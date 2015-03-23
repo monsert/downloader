@@ -9,3 +9,6 @@ class DownloadError(ConsoleDownloadBaseException):
 class FilePathError(ConsoleDownloadBaseException):
     pass
 
+
+class EmptyInputData(ConsoleDownloadBaseException):
+    pass
