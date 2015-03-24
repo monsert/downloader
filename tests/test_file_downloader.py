@@ -19,8 +19,24 @@ class TestFileDownload(unittest.TestCase):
         self.assertEqual(df.get_file_name(), "test.txt")
 
     def test_get_file_name(self):
-        df = DownloadFile("http://site.zone/path/to/test.txt/", "/tmp/")
+        df = DownloadFile("http://site.zone/path/to/test.txt/?q=arg", "/tmp/")
         self.assertEqual(df.get_file_name(), "test.txt")
+
+    def test_get_file_size_except(self):
+        df = DownloadFile("MOCK_URL", "MOCK_PATH")
+        tmp = df.get_file_size()
+        self.assertEqual(tmp, 'undefined')
+
+    @mock.patch('file_downloader.urllib2.urlopen')
+    def test_get_file_size(self, mock_urllib2_urlopen):
+        mock_urllib2_response = mock.MagicMock()
+        mock_urllib2_response.info.return_value.getheaders.return_value= [
+            "999", "size"]
+        mock_urllib2_urlopen.return_value = mock_urllib2_response
+        df = DownloadFile("MOCK_URL", "MOCK_PATH")
+        rez = df.get_file_size()
+        mock_urllib2_urlopen.assert_called_with("MOCK_URL")
+        self.assertEqual(rez, 999)
 
     @mock.patch('file_downloader.os.path.join')
     @mock.patch('file_downloader.urllib2.urlopen')
@@ -58,9 +74,6 @@ class TestFileDownload(unittest.TestCase):
 
 
 class TestDataFeed(unittest.TestCase):
-    def setUp(self):
-        pass
-
     def test_init(self):
         self.assertTrue(DataFeed('test_dir'))
 
@@ -77,5 +90,5 @@ class TestDataFeed(unittest.TestCase):
         with mock.patch('file_downloader.open', create=True) as mock_open:
             mock_file_handle = mock_open.return_value.__enter__.return_value
             df.get_urls_for_downloading()
-            mock_open.assert_called_with('MOCK_PATH', 'r')
+            mock_open.assert_called_with('MOCK_PATH', 'rb')
             mock_open.return_value.__exit__.assert_called_with(None, None, None)
