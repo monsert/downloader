@@ -1,7 +1,6 @@
 import os
 import urlparse
 import urllib2
-import threading
 import ConsoleDownloaderErrors as CDE
 
 
@@ -9,34 +8,25 @@ class DownloadFile():
     """
     :arg url, path to save dir
     """
-    DOWNLOAD_BLOCK_SIZE = 8192
-
-    # TODO: add opportunity to cancel downloading
-
-    def __init__(self, url, path_to_dir):
+    def __init__(self, url, path_to_downloads_dir):
         if not url:
             raise CDE.EmptyInputData("Argument URL can not be empty")
-        if not path_to_dir:
+        if not path_to_downloads_dir:
             raise CDE.EmptyInputData("Path to dir can not be empty")
         self._url = url
-        self._path_to_dir = path_to_dir
-        self._size_downloaded = 0
-
-    def get_file_size(self):
-        try:
-            download_file = urllib2.urlopen(self._url)
-            file_size = int(download_file.info().getheaders(
-                'Content-Length')[0])
-        except (urllib2.URLError, ValueError, IndexError):
-            return 'undefined'
-        return file_size
+        self._path_to_downloads_dir = path_to_downloads_dir
 
     def get_file_name(self):
-        file_path = urlparse.urlparse(self._url).path
-        if file_path.endswith('/'):
-            return file_path.split('/')[-2]
-        else:
-            return file_path.split('/')[-1]
+        try:
+            url_handler = urllib2.urlopen(self._url)
+            file_name = url_handler.info().getheaders(
+                'Content-Disposition')[0]
+        except (urllib2.URLError, ValueError) as err:
+            raise CDE.DownloadError(err.message)
+        except IndexError:
+            file_path = urlparse.urlparse(self._url).path.strip("/")
+            file_name = file_path.split('/')[-1]
+        return file_name
 
     def start(self):
         try:
@@ -44,14 +34,10 @@ class DownloadFile():
         except (urllib2.URLError, ValueError) as err:
             raise CDE.DownloadError(err.message)
         try:
-            with open(os.path.join(self._path_to_dir, self.get_file_name()),
-                      "wb+") as out_file:
-                while True:
-                    data = url_handler.read(self.DOWNLOAD_BLOCK_SIZE)
-                    if not data:
-                        break
-                    out_file.write(data)
-                    self._size_downloaded += self.DOWNLOAD_BLOCK_SIZE
+            with open(os.path.join(self._path_to_downloads_dir,
+                                   self.get_file_name()), "wb+") as out_file:
+                data = url_handler.read()
+                out_file.write(data)
         except IOError as err:
             raise CDE.FilePathError(err.message)
 
@@ -70,13 +56,13 @@ class DataFeed():
         """
         :return: list of urls from file
         """
+        out = list()
         try:
             with open(self.file_urls, 'rb') as urls:
                 out_set = set(urls.read().splitlines())
         except IOError as err:
             raise CDE.FilePathError(err.message)
-        if '' in out_set:
-            out = list(out_set.remove(''))
-        else:
-            out = list(out_set)
+        for url in out_set:
+            out.append(url.strip("/ "))
+        out = filter(lambda line: line, set(out))
         return out
