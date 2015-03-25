@@ -9,6 +9,9 @@ class DownloadFile():
     :arg url, path to save dir
     """
     def __init__(self, url, path_to_downloads_dir):
+        """
+        :type url: str
+        """
         if not url:
             raise CDE.EmptyInputData("Argument URL can not be empty")
         if not path_to_downloads_dir:
@@ -25,6 +28,8 @@ class DownloadFile():
             raise CDE.DownloadError(err.message)
         except IndexError:
             file_path = urlparse.urlparse(self._url).path.strip("/")
+            if not file_path:
+                file_path = urlparse.urlparse(self._url).hostname.strip("/")
             file_name = file_path.split('/')[-1]
         return file_name
 
