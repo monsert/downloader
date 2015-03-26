@@ -7,11 +7,11 @@ import threading
 import ConsoleDownloaderErrors as CDE
 
 
-class DownloadFile():
+class DownloadFile(threading.Thread):
     """
     :arg url, path to save dir
     """
-    __NAME_LENS = 10
+    __NAME_LENGTH = 10
 
     def __init__(self, url, path_to_downloads_dir):
         """
@@ -24,16 +24,18 @@ class DownloadFile():
         self._url = url
         self._path_to_downloads_dir = path_to_downloads_dir
         self._file_name = ""
+        self.live = True
+        super(DownloadFile, self).__init__()
 
     def get_file_name(self):
         generate_file_name = ""
         if not self._file_name:
             self._file_name = generate_file_name.join(random.choice(
                 string.ascii_uppercase + string.digits) for _ in range(
-                self.__NAME_LENS))
+                self.__NAME_LENGTH))
         return self._file_name
 
-    def start(self):
+    def run(self):
         try:
             url_handler = urllib2.urlopen(self._url)
         except (urllib2.URLError, ValueError) as err:
@@ -41,10 +43,16 @@ class DownloadFile():
         try:
             with open(os.path.join(self._path_to_downloads_dir,
                                    self.get_file_name()), "wb+") as out_file:
-                data = url_handler.read()
-                out_file.write(data)
+                while self.live:
+                    file_part = url_handler.read(8192)
+                    if not file_part:
+                        break
+                    out_file.write(file_part)
         except IOError as err:
             raise CDE.FilePathError(err.message)
+
+    def close(self):
+        self.live = False
 
 
 class DataFeed():
@@ -74,7 +82,7 @@ class DataFeed():
 
 
 class Manager():
-    THREAD_LIST = []
+    thread_list = []
 
     def __init__(self, url_list, path_to_save_dir):
         if not url_list or type(url_list) not in [list, set]:
@@ -86,11 +94,10 @@ class Manager():
 
     def init_all_downloads(self):
         for url in self.urls:
-            download_file = DownloadFile(url, self.path_to_save_dir)
-            new_thread = threading.Thread(target=download_file.start, args=())
-            self.THREAD_LIST.append(new_thread)
+            new_downloading_thread = DownloadFile(url, self.path_to_save_dir)
+            self.thread_list.append(new_downloading_thread)
 
     def start_all_downloads(self):
         self.init_all_downloads()
-        for thr in self.THREAD_LIST:
-            thr.start()
+        for thread in self.thread_list:
+            thread.start()
