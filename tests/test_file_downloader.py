@@ -1,4 +1,4 @@
-from file_downloader import DownloadFile, DataFeed
+from file_downloader import DownloadFile, DataFeed, Manager
 import ConsoleDownloaderErrors as CDE
 import unittest
 import mock
@@ -14,18 +14,11 @@ class TestFileDownload(unittest.TestCase):
     def test_init_invalid_path(self):
         self.assertRaises(CDE.EmptyInputData, DownloadFile, "MOCK_URL", "")
 
-    @mock.patch('file_downloader.urllib2.urlopen')
-    def test_get_file_name_good(self, mock_urllib2_urlopen):
-        mock_urllib2_urlopen.return_value.geturl.return_value = \
-            "http://site.zone/path/to/test.txt"
-        mock_urllib2_urlopen.return_value.info.return_value.getheaders\
-            .return_value = []
+    @mock.patch('file_downloader.random.choice')
+    def test_get_file_name_good(self, mock_random_choice):
+        mock_random_choice.return_value = "0"
         df = DownloadFile("http://site.zone/path/to/test.txt", "/tmp/")
-        self.assertEqual(df.get_file_name(), "test.txt")
-
-    def test_get_file_name_exception(self):
-        df = DownloadFile("MOCK_URL", "/tmp/")
-        self.assertRaises(CDE.DownloadError, df.get_file_name)
+        self.assertEqual(df.get_file_name(), "0000000000")
 
     @mock.patch('file_downloader.os.path.join')
     @mock.patch('file_downloader.urllib2.urlopen')
@@ -89,3 +82,43 @@ class TestDataFeed(unittest.TestCase):
             df.get_urls_for_downloading()
             mock_open.assert_called_with('MOCK_PATH', 'rb')
             mock_open.return_value.__exit__.assert_called_with(None, None, None)
+
+
+class TestManager(unittest.TestCase):
+
+    def test_init(self):
+        self.assertTrue(Manager(['1', '2'], "MOCK_PATH"))
+
+    def test_init_path_exception(self):
+        self.assertRaises(CDE.EmptyInputData, Manager, ['1'], '')
+
+    def test_init_type_exception(self):
+        self.assertRaises(CDE.EmptyInputData, Manager, '', "MOCK_PATH")
+
+
+    def test_init_type_exception2(self):
+        self.assertRaises(CDE.EmptyInputData, Manager, [], "MOCK_PATH")
+
+    @mock.patch("file_downloader.DownloadFile")
+    @mock.patch('file_downloader.threading.Thread')
+    def test_init_all_downloads(self, mock_threading_thread,
+                                mock_download_file):
+        mock_threading_thread.side_effect = ['thread1', 'thread2']
+        mock_download_file.return_value.start.return_value = "download_obj"
+        manage = Manager(['url1', 'url2'], "/tmp")
+        manage.init_all_downloads()
+        self.assertListEqual(manage.THREAD_LIST, ['thread1', 'thread2'])
+
+    def test_start_all_downloads(self):
+        manage = Manager(['url1', 'url2'], "/tmp")
+        mock_thread = mock.MagicMock()
+        mock_thread.return_value.start.return_value = "run"
+
+        manage.THREAD_LIST = [mock_thread]
+
+        init_all_downloads = mock.MagicMock()
+        init_all_downloads.return_value = ""
+
+        manage.init_all_downloads = init_all_downloads
+        manage.start_all_downloads()
+        self.assertIn(mock_thread, manage.THREAD_LIST)

@@ -1,6 +1,9 @@
 import os
-import urlparse
+import string
 import urllib2
+import random
+import threading
+
 import ConsoleDownloaderErrors as CDE
 
 
@@ -8,6 +11,8 @@ class DownloadFile():
     """
     :arg url, path to save dir
     """
+    __NAME_LENS = 10
+
     def __init__(self, url, path_to_downloads_dir):
         """
         :type url: str
@@ -18,20 +23,15 @@ class DownloadFile():
             raise CDE.EmptyInputData("Path to dir can not be empty")
         self._url = url
         self._path_to_downloads_dir = path_to_downloads_dir
+        self._file_name = ""
 
     def get_file_name(self):
-        try:
-            url_handler = urllib2.urlopen(self._url)
-            file_name = url_handler.info().getheaders(
-                'Content-Disposition')[0]
-        except (urllib2.URLError, ValueError) as err:
-            raise CDE.DownloadError(err.message)
-        except IndexError:
-            file_path = urlparse.urlparse(self._url).path.strip("/")
-            if not file_path:
-                file_path = urlparse.urlparse(self._url).hostname.strip("/")
-            file_name = file_path.split('/')[-1]
-        return file_name
+        generate_file_name = ""
+        if not self._file_name:
+            self._file_name = generate_file_name.join(random.choice(
+                string.ascii_uppercase + string.digits) for _ in range(
+                self.__NAME_LENS))
+        return self._file_name
 
     def start(self):
         try:
@@ -71,3 +71,26 @@ class DataFeed():
             out.append(url.strip("/ "))
         out = filter(lambda line: line, set(out))
         return out
+
+
+class Manager():
+    THREAD_LIST = []
+
+    def __init__(self, url_list, path_to_save_dir):
+        if not url_list or type(url_list) not in [list, set]:
+            raise CDE.EmptyInputData("Wrong input type. Only list or set.")
+        if not path_to_save_dir:
+            raise CDE.EmptyInputData("Path to dir can not be empty")
+        self.urls = url_list
+        self.path_to_save_dir = path_to_save_dir
+
+    def init_all_downloads(self):
+        for url in self.urls:
+            download_file = DownloadFile(url, self.path_to_save_dir)
+            new_thread = threading.Thread(target=download_file.start, args=())
+            self.THREAD_LIST.append(new_thread)
+
+    def start_all_downloads(self):
+        self.init_all_downloads()
+        for thr in self.THREAD_LIST:
+            thr.start()
