@@ -12,3 +12,7 @@ class FilePathError(ConsoleDownloadBaseException):
 
 class EmptyInputData(ConsoleDownloadBaseException):
     pass
+
+
+class WrongIndex(ConsoleDownloadBaseException):
+    pass
