@@ -9,6 +9,10 @@ import console_downloader_errors as cde
 
 
 class DownloadFile(threading.Thread):
+    """
+    Class override method run from threading.Thread for downloading file
+    from url and save it to directory.
+    """
     __NAME_LENGTH = 10
     __DOWNLOAD_BLOCK_SIZE = 8192
     __STATUS_ERROR = 'error'
@@ -37,6 +41,9 @@ class DownloadFile(threading.Thread):
 
     def _set_error(self, msg):
         """
+        Save error message to download_error_msg, update status to
+        __STATUS_ERROR and stop thread
+
         :param msg: Error message
         :type msg: string
         """
@@ -46,8 +53,11 @@ class DownloadFile(threading.Thread):
 
     def generate_file_name(self):
         """
+        Generate random file name. Length = 10 (__NAME_LENGTH), consists of [
+        A-Z0-9]
+
         :rtype: string
-        :return: random generated(A-Z0-9) file name (max length = __NAME_LENGTH)
+        :return: random generated file name
         """
         generate_file_name = ""
         if not self._file_name:
@@ -57,6 +67,9 @@ class DownloadFile(threading.Thread):
         return self._file_name
 
     def run(self):
+        """
+        Override method from class Thread for downloading file in thread.
+        """
         self._file_name = self.generate_file_name()
         try:
             url_handler = urllib2.urlopen(self._url)
@@ -130,16 +143,24 @@ class DownloadFile(threading.Thread):
 
 
 class DataFeed(object):
+    """
+    Parse input file with one URL per line. Validates the URLs, discards
+    empty.
+    """
     def __init__(self, path_to_file_with_urls):
         """
+        :raise: console_downloader_errors.FilePathError
         :param path_to_file_with_urls: path to file with urls one per line
         """
         if not path_to_file_with_urls:
             raise cde.FilePathError("Path to file can not be empty")
         self.file_urls = path_to_file_with_urls
 
-    def get_urls_for_downloading(self):
+    def parse_file_with_urls_for_downloading(self):
         """
+        Parse file, delete duplicate and fix mistake in ending of urls
+
+        :raise: console_downloader_errors.FilePathError
         :rtype: list
         :return: list of urls from file without duplicate
         """
@@ -157,6 +178,8 @@ class DataFeed(object):
 
 class Manager(object):
     """
+    Manager create run and close downloading threads.
+
     :type _thread_list: list
     :_thread_list: list of DownloadFile instance
     """
@@ -165,10 +188,8 @@ class Manager(object):
     def __init__(self, url_list, path_to_save_dir):
         """
         :param url_list: string with url
-        :param path_to_save_dir: path to directory for save there downloaded
-        files
+        :param path_to_save_dir: path to directory for save there files
         :raises: console_downloader_errors.EmptyInputData
-        :return:
         """
         if not url_list or type(url_list) not in [list, set]:
             raise cde.EmptyInputData("Wrong input type. Only list or set.")
@@ -179,7 +200,7 @@ class Manager(object):
 
     def _clean_finished_thread_from_list(self):
         """
-        Filter _thread_list by is_finished property and save it to _thread_list
+        Delete thread from list which not working (status: done, error, closed)
         """
         self._thread_list = filter(lambda thread: not thread.is_finished,
                                    self._thread_list)
@@ -188,42 +209,34 @@ class Manager(object):
         """
         Append to list _thread_list DownloadFile instance with url and
         path_to_save_dir for init
-        :return:
         """
         for url in self.urls:
             new_downloading_thread = DownloadFile(url, self.path_to_save_dir)
             self._thread_list.append(new_downloading_thread)
 
     def start_all_downloads(self):
-        self._init_all_downloads()
+        """
+        Start all threads from  _thread_list. If _thread_list is empty call
+        method _init_all_downloads for fill it.
+        """
+        if not self._thread_list:
+            self._init_all_downloads()
         for thread in self._thread_list:
             thread.start()
-
-    def close_download_by_index(self, index):
-        """
-        :param index: number of thread in list
-        :type index: int
-        :raises: console_downloader_errors.WrongIndex, AssertionError
-        :return:
-        """
-        assert isinstance(index, int)
-        try:
-            self._thread_list[index].close()
-            self._thread_list.pop(index)
-        except IndexError as err:
-            raise cde.WrongIndex(err.message)
 
     def close_all_downloads(self):
         """
         Safely close all threads for it use DownloadFile method close
-        :return:
         """
         for thread in self._thread_list:
             thread.close()
 
     @property
-    def get_info_about_downloading(self):
+    def info_about_all_downloading(self):
         """
+        Return info about all thread after it delete from list threads
+        threads with status closed, done, error
+
         :return: list with dict. dict has key index, name, status and error_msg
         """
         out = list()
@@ -238,15 +251,27 @@ class Manager(object):
 
 
 class UI(object):
+    """
+    Show status of all downloads, and can close all downloads safely
+    """
     _OUTPUT_FORMAT = "#{id} file_name: {name} - {status} {error_msg}  "
     TIME_UPDATE = 0.5
 
     def __init__(self, manager_instance):
+        """
+        :param manager_instance: object Manager
+        """
         if not isinstance(manager_instance, Manager):
             raise cde.EmptyInputData("Wrong input data")
         self.manager = manager_instance
 
     def convert_downloading_info_to_string(self, download_info):
+        """
+        :type download_info: dict
+        :param download_info: dict with keys index, name, status, error_msg
+        :rtype: string
+        :return: filled _OUTPUT_FORMAT by data from dict
+        """
         return self._OUTPUT_FORMAT.format(
             id=download_info['index'],
             name=download_info['name'],
@@ -254,9 +279,12 @@ class UI(object):
             error_msg=download_info['error_msg'])
 
     def show_progress(self):
+        """
+        Show downloading progress while not finished.
+        """
         while True:
             ui_body = ''
-            downloads_info = self.manager.get_info_about_downloading
+            downloads_info = self.manager.info_about_all_downloading
             if not downloads_info:
                 print "No more files. Downloads done"
                 break
@@ -267,13 +295,16 @@ class UI(object):
             time.sleep(self.TIME_UPDATE)
 
     def close_all_downloads(self):
+        """
+        Close all downloads. For it use manager api.
+        """
         self.manager.close_all_downloads()
 
 
 if __name__ == '__main__':
     ui = None
     try:
-        data = DataFeed("/tmp/1.txt").get_urls_for_downloading()
+        data = DataFeed("/tmp/1.txt").parse_file_with_urls_for_downloading()
         manage = Manager(data, "/tmp/1/")
         manage.start_all_downloads()
         ui = UI(manage)
