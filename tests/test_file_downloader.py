@@ -1,6 +1,5 @@
 import mock
 import unittest
-from StringIO import StringIO
 
 import file_downloader
 import console_downloader_errors as cde
@@ -81,6 +80,20 @@ class TestDownloadFile(unittest.TestCase):
         df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
         self.assertFalse(df.close())
 
+    def test_pause_star(self):
+        df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
+        df._download_status = 'downloading'
+        df.pause_start()
+        self.assertTrue(df.is_paused)
+        self.assertEqual(df.download_status, "pause")
+
+    def test_pause_star2(self):
+        df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
+        df._download_status = 'done'
+        df.pause_start()
+        self.assertFalse(df.is_paused)
+        self.assertEqual(df.download_status, "done")
+
     def test_property_is_running(self):
         df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
         self.assertTrue(df.is_running)
@@ -160,51 +173,74 @@ class TestManager(unittest.TestCase):
         mock_download_file.side_effect = [mock_thread, mock_thread]
         manage = file_downloader.Manager(['url1', 'url2'], "/tmp")
         manage._init_all_downloads()
-        self.assertDictContainsSubset(mock_thread, manage._thread_list)
+        self.assertDictContainsSubset(mock_thread, manage._threads)
 
     def test_start_all_downloads(self):
         manage = file_downloader.Manager(['url1', 'url2'], "/tmp")
         mock_thread = mock.MagicMock()
         mock_thread.return_value.start = "run"
-        manage._thread_list = {}
-        manage._init_all_downloads = lambda: manage._thread_list.update({
+        manage._threads = {}
+        manage._init_all_downloads = lambda: manage._threads.update({
             "NAME": mock_thread})
         manage.start_all_downloads()
-        self.assertIn("NAME", manage._thread_list)
+        self.assertIn("NAME", manage._threads)
 
     def test_close_all_downloads(self):
         manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
         thread_element = mock.MagicMock()
         thread_element.return_value.close = ''
 
-        manage._thread_list = {"NAME": thread_element, }
+        manage._threads = {"NAME": thread_element, }
         manage.close_all_downloads()
         thread_element.assert_called_once()
 
-    # @mock.patch(file_downloader.InfoDownload)
+    def test_close_download_by_index(self):
+        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        thread_element = mock.MagicMock()
+        thread_element.return_value.close = ''
+
+        manage._threads = {"NAME": thread_element, }
+        manage.close_download_by_index("NAME")
+        thread_element.assert_called_once()
+        self.assertFalse(manage._threads)
+
+    def test_close_download_by_index_exception(self):
+        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        self.assertRaises(cde.WrongIndex, manage.close_download_by_index, "id")
+
+    def test_pause_start(self):
+        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        thread_element = mock.MagicMock()
+        thread_element.return_value.pause_start = ''
+
+        manage._threads = {"NAME": thread_element, }
+        manage.close_download_by_index("NAME")
+        thread_element.assert_called_once()
+        self.assertFalse(manage._threads)
+
+    def test_pause_start_exception(self):
+        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        self.assertRaises(cde.WrongIndex, manage.pause_start, "id")
+
     def test_property_get_info_about_downloading(self):
         manager = file_downloader.Manager([1, 2, 3], "/tmp/")
         thread_element = mock.MagicMock()
         thread_element.file_name = 'file_name'
         thread_element.download_status = 'done'
         thread_element.error_message = 'download_error_msg'
-        manager._thread_list = {'NAME': thread_element}
+        manager._threads = {'NAME': thread_element}
         self.assertIsInstance(manager.info_about_all_downloading[-1],
-            file_downloader.InfoDownload,
-            )
+                              file_downloader.InfoDownload)
 
 
 class TestInfoDownload(unittest.TestCase):
+
     def test_init(self):
-        info = file_downloader.InfoDownload('name', 'done', '', False)
-        self.assertEqual(str(info), info._STR_FORMAT.format(name='name',
-                                                       status='done',
-                                                       error_msg=''))
-    def test_init_2(self):
-        info = file_downloader.InfoDownload('name', 'done', '', False)
+        info = file_downloader.InfoDownload('name', 'done', '', False, False)
         self.assertEqual(info.name, 'name')
         self.assertEqual(info.status, 'done')
         self.assertEqual(info.error_msg, '')
+
 
 class TestUI(unittest.TestCase):
 
@@ -213,13 +249,13 @@ class TestUI(unittest.TestCase):
         self.assertTrue(file_downloader.UI(mock_instance))
 
     def test_init_exception(self):
-        self.assertRaises(cde.EmptyInputData, file_downloader.UI, None)
+        self.assertRaises(AssertionError, file_downloader.UI, None)
 
     def test_close_all_downloads(self):
         mock_instance = file_downloader.Manager([1, 2], "way")
         thread_element = mock.MagicMock()
         thread_element.close.return_value = None
-        mock_instance._thread_list = {'NAME': thread_element, }
+        mock_instance._threads = {'NAME': thread_element, }
 
         ui = file_downloader.UI(mock_instance)
         self.assertIsNone(ui.close_all_downloads())

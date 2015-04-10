@@ -16,7 +16,6 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-# TODO: add start stop to DownloadFile -> Manager -> UI
 class DownloadFile(threading.Thread):
     """
     Class override method run from threading.Thread for downloading file
@@ -28,6 +27,7 @@ class DownloadFile(threading.Thread):
     __STATUS_DOWNLOADING = 'downloading'
     __STATUS_DONE = 'done'
     __STATUS_CLOSED = 'closed'
+    __STATUS_PAUSE = 'pause'
 
     _download_error_msg = ''
     _download_status = ''
@@ -46,6 +46,7 @@ class DownloadFile(threading.Thread):
         self._url = url
         self._path_to_downloads_dir = path_to_downloads_dir
         self._file_name = ""
+        self.is_thread_paused = False
         super(DownloadFile, self).__init__()
 
     def _set_error(self, msg):
@@ -85,17 +86,18 @@ class DownloadFile(threading.Thread):
         except (urllib2.URLError, ValueError) as err:
             self._set_error(err)
             return
-        self._download_status = self.__STATUS_DOWNLOADING
 
         try:
             with open(os.path.join(self._path_to_downloads_dir,
                                    self._file_name), "wb") as out_file:
                 while not self._stop_event.is_set():
-                    file_part = url_handler.read(self.__DOWNLOAD_BLOCK_SIZE)
-                    if not file_part:
-                        self._download_status = self.__STATUS_DONE
-                        break
-                    out_file.write(file_part)
+                    if not self.is_paused:
+                        self._download_status = self.__STATUS_DOWNLOADING
+                        file_part = url_handler.read(self.__DOWNLOAD_BLOCK_SIZE)
+                        if not file_part:
+                            self._download_status = self.__STATUS_DONE
+                            break
+                        out_file.write(file_part)
         except IOError as err:
             self._set_error(err.args[1])
 
@@ -106,6 +108,13 @@ class DownloadFile(threading.Thread):
         """
         self._download_status = self.__STATUS_CLOSED
         self._stop_event.set()
+
+    def pause_start(self):
+        if not self.is_finished and not self.is_thread_paused:
+            self.is_thread_paused = True
+            self._download_status = self.__STATUS_PAUSE
+        else:
+            self.is_thread_paused = False
 
     @property
     def is_running(self):
@@ -149,6 +158,14 @@ class DownloadFile(threading.Thread):
         :rtype: str
         """
         return self._file_name
+
+    @property
+    def is_paused(self):
+        """
+        :return: True is download is paused.
+        :rtype: bool
+        """
+        return self.is_thread_paused
 
 
 class DataFeed(object):
@@ -197,7 +214,7 @@ class InfoDownload(object):
     error_msg = ''
     is_finished = False
 
-    def __init__(self, name, status, error_msg, is_finished):
+    def __init__(self, name, status, error_msg, is_finished, is_paused):
         """
 
         :param name: file name
@@ -208,30 +225,24 @@ class InfoDownload(object):
         :type error_msg: string
         :param is_finished: True if status is not downloading
         :type is_finished: bool
+        :param is_paused: True if downloading is paused
+        :type is_paused: bool
         """
         self.name = name
         self.status = status
         self.error_msg = error_msg
         self.is_finished = is_finished
-
-    def __str__(self):
-        """
-        :return: Formatted line.
-         Example: file_name: FREDDI  -  status: error  HTTP Error 503
-        """
-        return self._STR_FORMAT.format(name=self.name, status=self.status,
-                                        error_msg=self.error_msg)
+        self.is_paused = is_paused
 
 
 class Manager(object):
     """
     Manager create run and close downloading threads.
 
-    :type _thread_list: dict
+    :type _threads: dict
     :_thread_list: dict of DownloadFile instance as value, file name as key
     """
-    # FIXME : rename _thread_list not list more
-    _thread_list = {}
+    _threads = {}
 
     def __init__(self, url_list, path_to_save_dir):
         """
@@ -246,14 +257,6 @@ class Manager(object):
         self.urls = url_list
         self.path_to_save_dir = path_to_save_dir
 
-    def _clean_finished_thread_from_list(self):
-        """
-        Delete thread from list which not working (status: done, error, closed)
-        """
-        for name, thread in self._thread_list.items():
-            if thread.is_finished:
-                self._thread_list.pop(name)
-
     def _init_all_downloads(self):
         """
         Append to list _thread_list DownloadFile instance with url and
@@ -261,7 +264,7 @@ class Manager(object):
         """
         for url in self.urls:
             new_downloading_thread = DownloadFile(url, self.path_to_save_dir)
-            self._thread_list.update({
+            self._threads.update({
                 new_downloading_thread.generate_file_name():
                     new_downloading_thread})
 
@@ -270,16 +273,16 @@ class Manager(object):
         Start all threads from  _thread_list. If _thread_list is empty call
         method _init_all_downloads for fill it.
         """
-        if not self._thread_list:
+        if not self._threads:
             self._init_all_downloads()
-        for name, thread in self._thread_list.items():
+        for name, thread in self._threads.items():
             thread.start()
 
     def close_all_downloads(self):
         """
         Safely close all threads for it use DownloadFile method close
         """
-        for name, thread in self._thread_list.items():
+        for name, thread in self._threads.items():
             thread.close()
 
     def close_download_by_index(self, name):
@@ -289,9 +292,20 @@ class Manager(object):
         :raises: console_downloader_errors.WrongIndex
         :return:
         """
-        if name in self._thread_list:
-            self._thread_list[name].close()
-            self._thread_list.pop(name)
+        if name in self._threads:
+            self._threads[name].close()
+            self._threads.pop(name)
+        else:
+            raise cde.WrongIndex("Wrong file name")
+
+    def pause_start(self, name):
+        """
+        Pause or finish downloading file
+
+        :param name: name (key) of thread in dict
+        """
+        if name in self._threads:
+            self._threads[name].pause_start()
         else:
             raise cde.WrongIndex("Wrong file name")
 
@@ -304,11 +318,12 @@ class Manager(object):
         :return: list with dict. dict has key index, name, status and error_msg
         """
         out = list()
-        for name, thread in self._thread_list.items():
+        for name, thread in self._threads.items():
             out.append(InfoDownload(name=thread.file_name,
                                     status=thread.download_status,
                                     error_msg=thread.error_message,
-                                    is_finished=thread.is_finished))
+                                    is_finished=thread.is_finished,
+                                    is_paused=thread.is_paused))
         return out
 
 
@@ -317,7 +332,8 @@ class UI(object):
     Show status of all downloads, and can close all downloads safely
     """
     TIME_UPDATE = 1
-    PALETTE = [('reversed', 'yellow,bold', ''),
+    STATUS_FORMAT = " file_name: {name}  -  status: {status}  {error_msg}"
+    PALETTE = [('reversed', 'yellow,bold', 'black'),
                ('standout', 'black', 'white')]
 
     sub_menu = False
@@ -326,10 +342,9 @@ class UI(object):
         """
         :param manager_instance: object Manager
         """
-        if not isinstance(manager_instance, Manager):
-            raise cde.EmptyInputData("Wrong input data")
+        assert isinstance(manager_instance, Manager)
         self.manager = manager_instance
-        self.downloads_status = None
+        self.info_about_downloads = None
         self._init_main()
 
     def _init_main(self):
@@ -337,9 +352,10 @@ class UI(object):
         take download status and crate screen for show information
         """
 
-        self.downloads_status = self.manager.info_about_all_downloading
-        self.main_screen = urwid.Padding(self.downloads_list_box(),
-                                         left=1, right=1)
+        self.info_about_downloads = self.manager.info_about_all_downloading
+        self.main_screen = urwid.Padding(
+            self.generate_downloads_status_list_box(self.info_about_downloads),
+            left=1, right=1)
 
     def update(self, loop, _):
         """
@@ -350,28 +366,31 @@ class UI(object):
         :param _: None
         :return:
         """
-        self.downloads_status = self.manager.info_about_all_downloading
+        self.info_about_downloads = self.manager.info_about_all_downloading
         element, position = self.main_screen.original_widget.original_widget \
             .get_focus()
 
         if not self.sub_menu:
-            self.main_screen.original_widget = self.downloads_list_box()
+            self.main_screen.original_widget =\
+            self.generate_downloads_status_list_box(self.info_about_downloads)
 
         self.main_screen.original_widget.original_widget.set_focus(position)
         loop.set_alarm_in(self.TIME_UPDATE, self.update, user_data=(loop, _))
 
-    def downloads_list_box(self):
+    def generate_downloads_status_list_box(self, info_about_downloads):
         """
         Generate list with button. Each button show information(file name,
         status) about one download and connected to submenu for manipulations
         on it download thread.
 
+        :param info_about_downloads: list of InfoDownload objects
+        :type info_about_downloads: list
         :return: Widget with download information and submenu for manipulation
         :rtype: Padding with ListBox inside
         """
         body = [urwid.Text("Downloading list: "), urwid.Divider()]
-        for element in self.downloads_status:
-            button = urwid.Button(str(element))
+        for element in info_about_downloads:
+            button = urwid.Button(self.str_format(element))
             urwid.connect_signal(button, 'click',
                                  self.sub_menu_download, element)
             body.append(urwid.AttrMap(button, None, focus_map='reversed'))
@@ -382,24 +401,35 @@ class UI(object):
         """
         Generate list with button for manipulations on selected download.
 
-
         :param button: signal from button with call this method
         :param info_download: object with information about download
         :type: InfoDownload
         """
         self.sub_menu = True
-        body = [urwid.Text('Downloading file {}  --  {} \n'.format(
-            info_download.name, info_download.status))]
+        body = [urwid.Text('\n Downloading file  {}  --  {} \n'.format(
+            info_download.name, info_download.status), align="center")]
 
         done = urwid.Button(' Delete')
+        pause = urwid.Button(' Pause')
         back = urwid.Button(' <<<')
 
         urwid.connect_signal(done, 'click', self.btn_close_download,
                              info_download.name)
+        urwid.connect_signal(pause, 'click', self.btn_pause_download,
+                             info_download.name)
         urwid.connect_signal(back, 'click', self.btn_back_to_download_list)
 
-        body.append(urwid.AttrMap(done, None, focus_map='reversed'))
-        body.append(urwid.AttrMap(back, None, focus_map='reversed'))
+        if info_download.is_finished:
+            done.set_label(" OK")
+            body.append(urwid.AttrMap(done, None, focus_map='reversed'))
+            body.append(urwid.AttrMap(back, None, focus_map='reversed'))
+        else:
+            if info_download.is_paused:
+                pause.set_label(' Start')
+            body.append(urwid.AttrMap(pause, None, focus_map='reversed'))
+            body.append(urwid.AttrMap(done, None, focus_map='reversed'))
+            body.append(urwid.AttrMap(back, None, focus_map='reversed'))
+
         self.main_screen.original_widget = urwid.Padding(urwid.ListBox(
             urwid.SimpleFocusListWalker(body)), left=1, right=1)
 
@@ -413,7 +443,18 @@ class UI(object):
         """
 
         self.manager.close_download_by_index(name)
-        self.btn_back_to_download_list(None)
+        self.btn_back_to_download_list(button)
+
+    def btn_pause_download(self, button, name):
+        """
+        Handler pressing the pause button
+
+        :param button: signal from button with call this method
+        :param name: file name
+        :type name: string
+        """
+        self.manager.pause_start(name)
+        self.btn_back_to_download_list(button)
 
     def btn_back_to_download_list(self, button):
         """
@@ -422,8 +463,9 @@ class UI(object):
         :param button: signal from button with call this method
         """
         self.sub_menu = False
-        self.downloads_status = self.manager.info_about_all_downloading
-        self.main_screen.original_widget = self.downloads_list_box()
+        self.info_about_downloads = self.manager.info_about_all_downloading
+        self.main_screen.original_widget = \
+            self.generate_downloads_status_list_box(self.info_about_downloads)
 
     def run(self):
         """
@@ -440,6 +482,10 @@ class UI(object):
         """
         self.manager.close_all_downloads()
 
+    def str_format(self, info_download):
+        return self.STATUS_FORMAT.format(name=info_download.name,
+                                         status=info_download.status,
+                                         error_msg=info_download.error_msg)
 
 if __name__ == '__main__':
     ui = None
@@ -453,5 +499,10 @@ if __name__ == '__main__':
         ui.close_all_downloads()
         print "-- Shutdown --"
     except cde.ConsoleDownloadBaseException as error:
+        ui.close_all_downloads()
         print "Oops... Something wrong --", error
         exit(1)
+    except Exception as e:
+        ui.close_all_downloads()
+        print "Fatal Error", e.message
+        exit(2)
