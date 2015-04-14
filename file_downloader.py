@@ -22,7 +22,7 @@ class DownloadFile(threading.Thread):
     from url and save it to directory.
     """
     __NAME_LENGTH = 10
-    __DOWNLOAD_BLOCK_SIZE = 8192
+    __DOWNLOAD_BLOCK_SIZE = 4096
     __STATUS_ERROR = 'error'
     __STATUS_DOWNLOADING = 'downloading'
     __STATUS_DONE = 'done'
@@ -47,6 +47,8 @@ class DownloadFile(threading.Thread):
         self._path_to_downloads_dir = path_to_downloads_dir
         self._file_name = ""
         self.is_thread_paused = False
+        self._size_file = 0
+        self._size_downloaded = 0
         super(DownloadFile, self).__init__()
 
     def _set_error(self, msg):
@@ -76,11 +78,21 @@ class DownloadFile(threading.Thread):
                 self.__NAME_LENGTH))
         return self._file_name
 
+    def get_file_size(self):
+        try:
+            download_file = urllib2.urlopen(self._url)
+            file_size = int(download_file.info().getheaders(
+                'Content-Length')[0])
+        except (urllib2.URLError, ValueError, IndexError):
+            return 0
+        return file_size
+
     def run(self):
         """
         Override method from class Thread for downloading file in thread.
         """
         self._file_name = self.generate_file_name()
+        self._size_file = self.get_file_size()
         try:
             url_handler = urllib2.urlopen(self._url)
         except (urllib2.URLError, ValueError) as err:
@@ -98,6 +110,7 @@ class DownloadFile(threading.Thread):
                             self._download_status = self.__STATUS_DONE
                             break
                         out_file.write(file_part)
+                        self._size_downloaded += len(file_part)
         except IOError as err:
             self._set_error(err.args[1])
 
@@ -167,6 +180,22 @@ class DownloadFile(threading.Thread):
         """
         return self.is_thread_paused
 
+    @property
+    def file_size(self):
+        """
+        :return: if can not get file size from url return 0.
+        :rtype: int
+        """
+        return self._size_file
+
+    @property
+    def downloaded_size(self):
+        """
+        :return: Current size of downloaded file
+        :rtype: int
+        """
+        return self._size_downloaded
+
 
 class DataFeed(object):
     """
@@ -208,13 +237,15 @@ class InfoDownload(object):
     Object for save information about thread (name, status, error_msg if
     exist, is_finished)
     """
-    _STR_FORMAT = " file_name: {name}  -  status: {status}  {error_msg}"
     name = None
     status = None
     error_msg = ''
     is_finished = False
+    file_size = 0
+    file_downloaded_size = 0
 
-    def __init__(self, name, status, error_msg, is_finished, is_paused):
+    def __init__(self, name, status, error_msg, is_finished, is_paused,
+                 file_size, downloaded_size):
         """
 
         :param name: file name
@@ -233,6 +264,8 @@ class InfoDownload(object):
         self.error_msg = error_msg
         self.is_finished = is_finished
         self.is_paused = is_paused
+        self.file_size = file_size
+        self.file_downloaded_size = downloaded_size
 
 
 class Manager(object):
@@ -323,16 +356,20 @@ class Manager(object):
                                     status=thread.download_status,
                                     error_msg=thread.error_message,
                                     is_finished=thread.is_finished,
-                                    is_paused=thread.is_paused))
+                                    is_paused=thread.is_paused,
+                                    file_size=thread.file_size,
+                                    downloaded_size=thread.downloaded_size))
         return out
 
 
 class UI(object):
     """
-    Show status of all downloads, and can close all downloads safely
+    Show status of all downloads, and can manipulate on them. ^C -- close all
+    downloads safely
     """
     TIME_UPDATE = 1
-    STATUS_FORMAT = " file_name: {name}  -  status: {status}  {error_msg}"
+    STATUS_FORMAT = " file_name: {name}  - status: {status}  {size}   {" \
+                    "error_msg}"
     PALETTE = [('reversed', 'yellow,bold', 'black'),
                ('standout', 'black', 'white')]
 
@@ -483,9 +520,17 @@ class UI(object):
         self.manager.close_all_downloads()
 
     def str_format(self, info_download):
+        if not info_download.file_size:
+            download_size = "{0:.2f} kb".format(
+                info_download.file_downloaded_size/1000.0)
+        else:
+            download_size = "{0:.2f} %".format(
+                (info_download.file_downloaded_size /
+                 float(info_download.file_size))*100.0)
         return self.STATUS_FORMAT.format(name=info_download.name,
-                                         status=info_download.status,
-                                         error_msg=info_download.error_msg)
+                                         status=info_download.status.center(11),
+                                         error_msg=info_download.error_msg,
+                                         size=download_size)
 
 if __name__ == '__main__':
     ui = None
@@ -503,6 +548,5 @@ if __name__ == '__main__':
         print "Oops... Something wrong --", error
         exit(1)
     except Exception as e:
-        ui.close_all_downloads()
         print "Fatal Error", e.message
         exit(2)

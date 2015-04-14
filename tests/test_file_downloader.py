@@ -236,17 +236,22 @@ class TestManager(unittest.TestCase):
 class TestInfoDownload(unittest.TestCase):
 
     def test_init(self):
-        info = file_downloader.InfoDownload('name', 'done', '', False, False)
+        info = file_downloader.InfoDownload('name', 'done', '', False, False,
+                                            0, 100)
         self.assertEqual(info.name, 'name')
         self.assertEqual(info.status, 'done')
         self.assertEqual(info.error_msg, '')
+        self.assertEqual(info.file_size, 0)
+        self.assertEqual(info.file_downloaded_size, 100)
 
 
 class TestUI(unittest.TestCase):
 
     def test_init_good(self):
         mock_instance = file_downloader.Manager([1, 2], "way")
-        self.assertTrue(file_downloader.UI(mock_instance))
+        ui = file_downloader.UI
+        ui._init_main = lambda x: True
+        self.assertTrue(ui(mock_instance))
 
     def test_init_exception(self):
         self.assertRaises(AssertionError, file_downloader.UI, None)
@@ -256,6 +261,7 @@ class TestUI(unittest.TestCase):
         thread_element = mock.MagicMock()
         thread_element.close.return_value = None
         mock_instance._threads = {'NAME': thread_element, }
-
-        ui = file_downloader.UI(mock_instance)
+        ui = file_downloader.UI
+        ui._init_main = lambda x: True
+        ui = ui(mock_instance)
         self.assertIsNone(ui.close_all_downloads())
