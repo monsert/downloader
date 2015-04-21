@@ -1,6 +1,9 @@
 import mock
 import unittest
+import json
 
+import UI
+import SDJP
 import file_downloader
 import console_downloader_errors as cde
 
@@ -118,75 +121,73 @@ class TestDownloadFile(unittest.TestCase):
         df._file_name = 'name'
         self.assertEqual(df.file_name, 'name')
 
+    def test_property_file_size(self):
+        df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
+        df._size_file = 123
+        self.assertEqual(df.file_size, 123)
 
-class TestDataFeed(unittest.TestCase):
-    def test_init(self):
-        self.assertTrue(file_downloader.DataFeed('test_dir'))
-
-    def test_init_empty_line(self):
-        self.assertRaises(cde.FilePathError, file_downloader.DataFeed, "")
-
-    def test_get_urls_for_downloading_file_exception(self):
-        urls = mock.MagicMock()
-        urls.return_value.read.return_value.splitlines\
-            .return_value = ['1', '1', '2//   ']
-        df = file_downloader.DataFeed('MOCK_PATH')
-        self.assertRaises(cde.FilePathError,
-                          df.parse_file_with_urls_for_downloading)
-
-    def test_get_urls_for_downloading(self):
-        df = file_downloader.DataFeed('MOCK_PATH')
-        mock_read = mock.MagicMock()
-        mock_read.read.return_value.splitlines.return_value = ['1', '1///',
-                                                               '2//   ', '2']
-        with mock.patch('file_downloader.open', create=True) as mock_open:
-            mock_file_handle = mock_open.return_value.__enter__.return_value \
-                = mock_read
-            rez = df.parse_file_with_urls_for_downloading()
-            mock_open.assert_called_with('MOCK_PATH', 'rb')
-            mock_open.return_value.__exit__.assert_called_with(None, None, None)
-        self.assertListEqual(rez, ['1', '2'])
+    def test_property_downloaded_size(self):
+        df = file_downloader.DownloadFile("MOCK_URL", "MOCK_PATH")
+        df._size_downloaded = 1234
+        self.assertEqual(df.downloaded_size, 1234)
 
 
 class TestManager(unittest.TestCase):
 
     def test_init(self):
-        self.assertTrue(file_downloader.Manager(['1', '2'], "MOCK_PATH"))
+        self.assertTrue(file_downloader.Manager("MOCK_PATH"))
 
     def test_init_path_exception(self):
-        self.assertRaises(cde.EmptyInputData, file_downloader.Manager,
-                          ['1'], '')
+        self.assertRaises(cde.EmptyInputData, file_downloader.Manager, '')
 
-    def test_init_type_exception(self):
-        self.assertRaises(cde.EmptyInputData, file_downloader.Manager,
-                          '', "MOCK_PATH")
+    @mock.patch('file_downloader.DownloadFile')
+    def test_add_new_download(self, DownloadFile):
+        DownloadFile.return_value.generate_file_name.return_value = "test_name"
+        DownloadFile.start.return_value = True
 
-    def test_init_type_exception2(self):
-        self.assertRaises(cde.EmptyInputData, file_downloader.Manager,
-                          [], "MOCK_PATH")
+        manage = file_downloader.Manager("/tmp")
+        manage._threads = {}
 
-    @mock.patch("file_downloader.DownloadFile")
-    def test__init_all_downloads(self, mock_download_file):
-        mock_thread = mock.MagicMock()
-        mock_thread.return_value.generate_file_name.side_effect \
-            = ["NAME1", "NAME2"]
-        mock_download_file.side_effect = [mock_thread, mock_thread]
-        manage = file_downloader.Manager(['url1', 'url2'], "/tmp")
-        manage._init_all_downloads()
-        self.assertDictContainsSubset(mock_thread, manage._threads)
+        manage.add_new_download("new download")
+        self.assertIn("test_name", manage._threads)
+
+    @mock.patch('file_downloader.DownloadFile')
+    def test_add_new_download2(self, DownloadFile):
+        DownloadFile.return_value.generate_file_name.return_value = "test_name"
+        DownloadFile.start.return_value = True
+
+        manage = file_downloader.Manager("/tmp")
+        manage._threads = {}
+
+        manage.add_new_download(["new download", "new download"])
+        self.assertIn("test_name", manage._threads)
 
     def test_start_all_downloads(self):
-        manage = file_downloader.Manager(['url1', 'url2'], "/tmp")
+        manage = file_downloader.Manager("/tmp")
+
         mock_thread = mock.MagicMock()
-        mock_thread.return_value.start = "run"
-        manage._threads = {}
-        manage._init_all_downloads = lambda: manage._threads.update({
-            "NAME": mock_thread})
+        mock_thread.is_paused = True
+        mock_thread.return_value.pause_start_download.return_value = True
+
+        manage._threads = {"NAME": mock_thread}
         manage.start_all_downloads()
+        mock_thread.pause_start_download.assert_called_once()
+        self.assertIn("NAME", manage._threads)
+
+    def test_start_all_downloads2(self):
+        manage = file_downloader.Manager("/tmp")
+
+        mock_thread = mock.MagicMock()
+        mock_thread.is_paused = False
+        mock_thread.return_value.start.return_value = True
+
+        manage._threads = {"NAME": mock_thread}
+        manage.start_all_downloads()
+        mock_thread.start.assert_called_once()
         self.assertIn("NAME", manage._threads)
 
     def test_close_all_downloads(self):
-        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        manage = file_downloader.Manager('MOCK_PATH')
         thread_element = mock.MagicMock()
         thread_element.return_value.close = ''
 
@@ -195,7 +196,7 @@ class TestManager(unittest.TestCase):
         thread_element.assert_called_once()
 
     def test_close_download_by_index(self):
-        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        manage = file_downloader.Manager('MOCK_PATH')
         thread_element = mock.MagicMock()
         thread_element.return_value.close = ''
 
@@ -205,13 +206,13 @@ class TestManager(unittest.TestCase):
         self.assertFalse(manage._threads)
 
     def test_close_download_by_index_exception(self):
-        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        manage = file_downloader.Manager('MOCK_PATH')
         self.assertRaises(cde.WrongIndex, manage.close_download_by_index, "id")
 
     def test_pause_start(self):
-        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
+        manage = file_downloader.Manager('MOCK_PATH')
         thread_element = mock.MagicMock()
-        thread_element.return_value.pause_start = ''
+        thread_element.return_value.pause_start_download = ''
 
         manage._threads = {"NAME": thread_element, }
         manage.close_download_by_index("NAME")
@@ -219,11 +220,11 @@ class TestManager(unittest.TestCase):
         self.assertFalse(manage._threads)
 
     def test_pause_start_exception(self):
-        manage = file_downloader.Manager(['MOCK_URL'], 'MOCK_PATH')
-        self.assertRaises(cde.WrongIndex, manage.pause_start, "id")
+        manage = file_downloader.Manager('MOCK_PATH')
+        self.assertRaises(cde.WrongIndex, manage.pause_start_download, "id")
 
     def test_property_get_info_about_downloading(self):
-        manager = file_downloader.Manager([1, 2, 3], "/tmp/")
+        manager = file_downloader.Manager("/tmp/")
         thread_element = mock.MagicMock()
         thread_element.file_name = 'file_name'
         thread_element.download_status = 'done'
@@ -245,23 +246,401 @@ class TestInfoDownload(unittest.TestCase):
         self.assertEqual(info.file_downloaded_size, 100)
 
 
-class TestUI(unittest.TestCase):
+class TestNinja(unittest.TestCase):
 
-    def test_init_good(self):
-        mock_instance = file_downloader.Manager([1, 2], "way")
-        ui = file_downloader.UI
-        ui._init_main = lambda x: True
-        self.assertTrue(ui(mock_instance))
+    @mock.patch('file_downloader.BaseServer')
+    def test_init(self, base):
+        manage = file_downloader.Manager()
+        self.assertTrue(file_downloader.Ninja(manage))
 
     def test_init_exception(self):
-        self.assertRaises(AssertionError, file_downloader.UI, None)
+        self.assertRaises(AssertionError, file_downloader.Ninja, "")
 
-    def test_close_all_downloads(self):
-        mock_instance = file_downloader.Manager([1, 2], "way")
-        thread_element = mock.MagicMock()
-        thread_element.close.return_value = None
-        mock_instance._threads = {'NAME': thread_element, }
-        ui = file_downloader.UI
-        ui._init_main = lambda x: True
-        ui = ui(mock_instance)
-        self.assertIsNone(ui.close_all_downloads())
+    def test_command_delete(self):
+        man = file_downloader.Manager()
+        mock_manage = mock.MagicMock()
+        mock_manage.close_download_by_index.return_value = True
+        serv = file_downloader.Ninja(man)
+        serv.manager = mock_manage
+        serv.command_delete("name")
+        mock_manage.close_download_by_index.assert_called_once_with("name")
+
+    def test_command_close_all(self):
+        man = file_downloader.Manager()
+        mock_manage = mock.MagicMock()
+        mock_manage.close_all_downloads.return_value = True
+        serv = file_downloader.Ninja(man)
+        serv.manager = mock_manage
+        serv.command_close_all("")
+        mock_manage.close_all_downloads.assert_called_once()
+
+    def test_command_pause_start(self):
+        man = file_downloader.Manager()
+        mock_manage = mock.MagicMock()
+        mock_manage.pause_start_download.return_value = True
+        serv = file_downloader.Ninja(man)
+        serv.manager = mock_manage
+        serv.command_pause_start("name")
+        mock_manage.pause_start_download.assert_called_once_with("name")
+
+    def test_command_add(self):
+        man = file_downloader.Manager()
+        mock_manage = mock.MagicMock()
+        mock_manage.add_new_download.return_value = True
+        serv = file_downloader.Ninja(man)
+        serv.manager = mock_manage
+        serv.command_add("url")
+        mock_manage.add_new_download.assert_called_once_with("url")
+
+    # @mock.patch('file_downloader.BaseServer')
+    def test_command_get_info(self, ):
+        self.doCleanups()
+        man = file_downloader.Manager()
+
+        mock_manage = mock.MagicMock()
+        mock_info = mock.MagicMock()
+
+        mock_info.return_value.__dict__ = {'name': 'object'}
+        mock_manage.info_about_all_downloading = [mock_info]
+
+        serv = file_downloader.Ninja(man)
+        serv.send_SDJP = lambda x: True
+        serv.manager = mock_manage
+        serv.command_info("")
+        mock_manage.command_info.assert_called_once()
+
+# ------------------------UI.py------------------------------
+
+
+class TestDataFeed(unittest.TestCase):
+    def test_init(self):
+        self.assertTrue(UI.DataFeed('test_dir'))
+
+    def test_init_empty_line(self):
+        self.assertRaises(cde.FilePathError, UI.DataFeed, "")
+
+    def test_get_urls_for_downloading_file_exception(self):
+        urls = mock.MagicMock()
+        urls.return_value.read.return_value.splitlines\
+            .return_value = ['1', '1', '2//   ']
+        df = UI.DataFeed('MOCK_PATH')
+        self.assertRaises(cde.FilePathError,
+                          df.parse_file_with_urls_for_downloading)
+
+    def test_parse_file_with_urls_for_downloading(self):
+        df = UI.DataFeed('MOCK_PATH')
+        mock_read = mock.MagicMock()
+        mock_read.read.return_value.splitlines.return_value = ['1', '1///',
+                                                               '2//   ', '2']
+        with mock.patch('UI.open', create=True) as mock_open:
+            mock_file_handle = mock_open.return_value.__enter__.return_value\
+                = mock_read
+            rez = df.parse_file_with_urls_for_downloading()
+            mock_open.assert_called_with('MOCK_PATH', 'rb')
+            mock_open.return_value.__exit__.assert_called_with(None, None, None)
+        self.assertListEqual(rez, ['1', '2'])
+
+
+class TestNetworkAdapter(unittest.TestCase):
+
+    @mock.patch('SDJP.socket')
+    def test_command_add(self, socket):
+        mock_send = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        urls = ['1', '2', '3', '4']
+        net.command_add(urls)
+
+        self.assertEqual(net.send_SDJP.call_count, 4)
+
+    @mock.patch('SDJP.socket')
+    @mock.patch('UI.BaseClient')
+    def test_command_add2(self, base, socket):
+        mock_send = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        urls = '1'
+        net.command_add(urls)
+
+        self.assertEqual(net.send_SDJP.call_count, 1)
+
+    @mock.patch('SDJP.socket')
+    def test_command_delete(self, socket):
+        mock_send = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        net.command_delete('name')
+        net.send_SDJP.assert_called_with(dict(type="COMMAND", command="DELETE",
+                                              data='name'))
+
+    @mock.patch('SDJP.socket')
+    def test_command_close_all(self, socket):
+        mock_send = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        net.command_close_all()
+        net.send_SDJP.assert_called_with(dict(type="COMMAND",
+                                              command="CLOSE_ALL",
+                                              data=''))
+
+    @mock.patch('SDJP.socket')
+    def test_command_pause_start(self, socket):
+        mock_send = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        net.command_pause_start("name")
+        net.send_SDJP.assert_called_with({"type": "COMMAND",
+                                          "command": "PAUSE_START",
+                                          "data": "name"})
+
+    @mock.patch('SDJP.socket')
+    def test_command_info(self, socket):
+        mock_send = mock.MagicMock()
+        mock_recv = mock.MagicMock()
+        mock_send.send_SDJP.return_value = True
+        mock_recv.receive_SDJP.return_value = {'type': 'command',
+                                               'command': 'add',
+                                               'data': 'data'}
+        net = UI.NetworkAdapter()
+        net.send_SDJP = mock_send
+        net.receive_SDJP = mock_recv
+        net.command_info()
+        net.send_SDJP.assert_called_with(dict(type="COMMAND",
+                                              command="INFO",
+                                              data=''))
+
+# -----------------------SDJP.py-----------------------------
+
+
+class TestBaseSDJP (unittest.TestCase):
+    valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
+    invalid_msg = {'type': '', 'command': 'ADD', 'data': 'name'}
+
+    @mock.patch('SDJP.socket')
+    def test_init(self, socket):
+        self.assertTrue(SDJP.BaseSDJP())
+
+    @mock.patch('SDJP.socket')
+    def test_receive(self, socket):
+        base = SDJP.BaseSDJP()
+        base.soc.recv.side_effect = ['1234', '5678']
+        self.assertEqual(base._receive(4), '1234')
+        self.assertEqual(base._receive(4), '5678')
+
+    @mock.patch('SDJP.socket')
+    def test_send(self, socket):
+        base = SDJP.BaseSDJP()
+        base._send('test msg')
+        socket.send.assert_called_once()
+
+    def test_validation_exception(self):
+        base = SDJP.BaseSDJP()
+        self.assertRaises(SDJP.InvalidProtocol, base.validation, "exception")
+
+    def test_validation_exception2(self):
+        base = SDJP.BaseSDJP()
+        frame = json.dumps(self.invalid_msg)
+        self.assertRaises(SDJP.InvalidProtocol, base.validation, frame)
+
+    def test_validation(self):
+        base = SDJP.BaseSDJP()
+        test_body = json.dumps(self.valid_msg)
+        self.assertEqual(base.validation(test_body), self.valid_msg)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp(self, socket):
+        base = SDJP.BaseSDJP()
+        base.soc.recv.side_effect = ['000050**', json.dumps(self.valid_msg)]
+        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp2(self, socket):
+        base = SDJP.BaseSDJP()
+        base.soc.recv.side_effect = ['000050*', json.dumps(self.invalid_msg)]
+        self.assertEqual(base.receive_SDJP(), None)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp3(self, socket):
+        base = SDJP.BaseSDJP()
+        base.soc.recv.side_effect = ['0000ab**', json.dumps(self.valid_msg)]
+        self.assertEqual(base.receive_SDJP(), None)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp4(self, socket):
+        base = SDJP.BaseSDJP()
+        base.soc.recv.side_effect = ['000050**', json.dumps(self.valid_msg)]
+        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+
+    @mock.patch('SDJP.socket')
+    def test_send_sdjp(self, socket):
+        base = SDJP.BaseSDJP()
+        base.send_SDJP('test msg')
+        socket.send.assert_called_once()
+        socket.send.assert_with('test msg')
+
+
+class TestBaseClient(unittest.TestCase):
+    valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
+    invalid_msg = {'type': '', 'command': 'ADD', 'data': 'name'}
+
+    @mock.patch('SDJP.socket')
+    def test_init(self, socket):
+        base = SDJP.BaseClient()
+        socket.connect.send.assert_with((base._HOST, base._PORT))
+
+    @mock.patch('SDJP.socket')
+    def test_shutdown_client(self, socket):
+        base = SDJP.BaseClient()
+        base.shutdown_client()
+        self.assertFalse(base.work)
+
+    @mock.patch('SDJP.socket')
+    def test_run_client(self, socket):
+        base = SDJP.BaseClient()
+        base.soc.recv.side_effect = ['000111**', json.dumps(self.valid_msg),
+                                     '000111**', json.dumps(self.invalid_msg)]
+        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+        base.run()
+        self.assertFalse(base.work)
+
+
+class TestBaseServer(unittest.TestCase):
+    valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
+    invalid_msg = {'type': '', 'command': 'delete', 'data': 'name'}
+
+    @mock.patch('SDJP.socket')
+    def test_init(self, socket):
+        base = SDJP.BaseClient()
+        socket.bind.assert_with((base._HOST, base._PORT))
+        socket.listen.assert_with(base._BLOCK_SIZE)
+
+
+    @mock.patch('SDJP.socket')
+    def test_shutdown_server(self, socket):
+        base = SDJP.BaseServer()
+        base.shutdown_server()
+        self.assertFalse(base.server_work)
+
+    @mock.patch('SDJP.socket')
+    def test_receive(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['000111**',]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        self.assertEqual(base._receive(8), '000111**')
+
+    @mock.patch('SDJP.socket')
+    def test_send(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.send.return_value = None
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        base._send("000111**")
+        socket.send.assert_with('000111**')
+
+    @mock.patch('SDJP.socket')
+    def test_run_command(self, socket):
+        valid_msg = [{'command': 'ADD', 'data': 'name'},
+                     {'command': 'CLOSE_ALL', 'data': ''},
+                     {'command': 'DELETE', 'data': 'name'},
+                     {'command': 'PAUSE_START', 'data': 'name'},
+                     {'command': 'INFO', 'data': ''}]
+        base = SDJP.BaseServer()
+        for di in valid_msg:
+            base._run_command(di)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['000050**', json.dumps(
+            self.valid_msg)]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp2(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['000050*', json.dumps(
+            self.invalid_msg)]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp3(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['0000ab**', json.dumps(
+            self.valid_msg)]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
+
+    @mock.patch('SDJP.socket')
+    def test_receive_sdjp4(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['000050**', json.dumps(
+            self.valid_msg)]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+
+    @mock.patch('SDJP.socket')
+    def test_send_sdjp(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.send.side_effect = [1, 2, 3]
+
+        base = SDJP.BaseServer()
+        base.connection = mock_connection
+        base.send_SDJP('test msg')
+        socket.send.assert_called_once()
+        socket.send.assert_with("000012**{'test msg'}")
+
+    @mock.patch('SDJP.socket')
+    def test_run(self, socket):
+        mock_connection = mock.MagicMock()
+        mock_connection.recv.side_effect = ['000011**',
+                                            json.dumps(self.valid_msg),
+                                            '000011**',
+                                            json.dumps(self.valid_msg)]
+        mock_connection.close.return_value = True
+
+        mock_accept = mock.MagicMock()
+        mock_accept.accept.return_value = mock_connection, "localhost"
+        mock_accept.close.return_value = None
+
+        mock__receive = mock.MagicMock()
+        mock__receive.side_effect = ['000011**',
+                                     json.dumps(self.valid_msg),
+                                     '000011**',
+                                     json.dumps(self.invalid_msg)]
+
+        base = SDJP.BaseServer()
+        base._receive = mock__receive
+
+        base.soc = mock_accept
+        base.connection = mock_connection
+        try:
+            base.run()
+        except StopIteration:
+            base.shutdown_server()
+            base.run()
+        self.assertEqual(base.soc.accept.call_count, 2)
+        self.assertTrue(base.download)
+        base.soc.close.assert_called_once()
