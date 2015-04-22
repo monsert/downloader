@@ -32,29 +32,15 @@ class InvalidProtocol(SDJPError):
     pass
 
 
+class ConnectionError(SDJPError):
+    pass
+
+
 SDJP_COMMAND = ('info', 'add', 'delete', 'pause_start', 'start', 'close_all')
 SDJP_TYPE = ('json', 'string', 'command')
 
 
 class BaseSDJP(object):
-    def __init__(self):
-        self.soc = socket.socket()
-
-    def _receive(self, size):
-        """
-        :type size: int
-        :param size: size with read from socket
-        :return: received data from socket
-        """
-        data = self.soc.recv(size)
-        return data
-
-    def _send(self, msg):
-        """
-        :param msg: message for sending
-        """
-        self.soc.send(msg)
-
     def validation(self, raw_body):
         """
         :param raw_body: JSON
@@ -65,47 +51,67 @@ class BaseSDJP(object):
         try:
             data = json.loads(raw_body)
         except ValueError:
-            raise InvalidProtocol("Wrong protocol body")
+            raise InvalidProtocol('Wrong protocol body')
         if 'type' and 'command' and 'data' in data:
             if data['type'].lower() in SDJP_TYPE:
                 return data
-        raise InvalidProtocol("Wrong protocol rows")
+        raise InvalidProtocol('Wrong protocol rows')
 
-    def receive_SDJP(self):
-        """
-        Receive data from socket in SDJP Format
+    def run_command(self, data):
+        cmd_map = {'close_all': self.command_close_all,
+                   'delete': self.command_delete,
+                   'pause_start': self.command_pause_start,
+                   'info': self.command_info,
+                   'add': self.command_add,}
 
-        :raise: InvalidProtocol
-        :rtype: dict
-        :return: Body of protocol
-        """
-        head = self._receive(8)
-        if head[-2:] != "**":
-            return None
-        try:
-            size = int(head[:-2])
-        except ValueError:
-            return None
-        raw_body = self._receive(size)
-        body = self.validation(raw_body)
-        return body
+        cmd_map[data['command'].lower()](data['data'])
 
-    def send_SDJP(self, msg):
+    def command_add(self, arg):
         """
-        Send data using SDJP.
+        You may override this method in a subclass. If you want to use this
+        command from SDJP.
+        :param arg: one argument with is data in SDJP
+        """
+        pass
 
-        :param msg: dict with keys command, type, data
+    def command_delete(self, arg):
         """
-        data = json.dumps(msg)
-        frame = "{head:06d}**{data}".format(head=len(data), data=data)
-        self._send(frame)
+        You may override this method in a subclass. If you want to use this
+        command from SDJP.
+        :param arg: one argument with is data in SDJP
+        """
+        pass
+
+    def command_close_all(self, arg):
+        """
+        You may override this method in a subclass. If you want to use this
+        command from SDJP.
+        :param arg: one argument with is data in SDJP
+        """
+        pass
+
+    def command_pause_start(self, arg):
+        """
+        You may override this method in a subclass. If you want to use this
+        command from SDJP.
+        :param arg: one argument with is data in SDJP
+        """
+        pass
+
+    def command_info(self, arg):
+        """
+        You may override this method in a subclass. If you want to use this
+        command from SDJP.
+        :param arg: one argument with is data in SDJP
+        """
+        pass
 
 
 class BaseServer(BaseSDJP):
     """
     Server with consume data only in SDJP.
     """
-    _IP = "localhost"
+    _IP = 'localhost'
     _PORT = 5000
     _BLOCK_SIZE = 1024
     _BACKLOG = 2
@@ -114,33 +120,35 @@ class BaseServer(BaseSDJP):
     download = True
 
     def __init__(self):
-        super(BaseServer, self).__init__()
+        self.soc = socket.socket()
         self.soc.bind((self._IP, self._PORT))
         self.soc.listen(self._BACKLOG)
 
-
     def _receive(self, size):
-        data = self.connection.recv(size)
-        return data
+        """
+        :type size: int
+        :param size: size with read from socket
+        :return: received data from socket
+        """
+        buf = ''
+        while size - len(buf) != 0:
+            tmp = self.connection.recv(size - len(buf))
+            buf += tmp
+        return buf
 
     def _send(self, msg):
-        self.connection.send(msg)
-
-    def _run_command(self, data):
-        cmd_map ={'close_all': self.command_close_all,
-                  'delete': self.command_delete,
-                  'pause_start': self.command_pause_start,
-                  'info': self.command_info,
-                  'add': self.command_add}
-
-        cmd_map[data['command'].lower()](data['data'])
+        """
+        :param msg: message for sending
+        """
+        size = len(msg)
+        buf = 0
+        while buf < size:
+            buf += self.connection.send(msg)
 
     def receive_SDJP(self):
-        data = self._receive(8)
-        if data[-2:] != "**":
-            raise InvalidProtocol(132)
+        data = self._receive(32)
         try:
-            size = int(data[:-2])
+            size = int(data, base=2)
         except ValueError:
             raise InvalidProtocol(111)
         data = self._receive(size)
@@ -149,7 +157,7 @@ class BaseServer(BaseSDJP):
 
     def send_SDJP(self, msg):
         data = json.dumps(msg)
-        frame = "{head:06d}**{body}".format(head=len(data), body=data)
+        frame = '{head:032b}{body}'.format(head=len(data), body=data)
         self._send(frame)
 
     def shutdown_server(self):
@@ -162,81 +170,69 @@ class BaseServer(BaseSDJP):
             while self.download:
                 try:
                     data = self.receive_SDJP()
-                    self._run_command(data)
+                    self.run_command(data)
                 except InvalidProtocol:
                     self.connection.close()
                     self.download = False
         self.soc.close()
 
-    def command_add(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param connection: connection with can send answer to client (example
-        connection.send(message))
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_delete(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param connection: connection with can send answer to client (example
-        self.send_SDJP(connection,message)
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_close_all(self,  arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param connection: connection with can send answer to client (example
-        self.send_SDJP(connection,message)
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_pause_start(self,  arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param connection: connection with can send answer to client (example
-        self.send_SDJP(connection,message)
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_info(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param connection: connection with can send answer to client (example
-        self.send_SDJP(connection,message)
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
 
 class BaseClient(BaseSDJP):
-    _HOST = "localhost"
+    _HOST = 'localhost'
     _PORT = 5000
     _BLOCK_SIZE = 1024
 
     work = True
 
     def __init__(self):
-        super(BaseClient, self).__init__()
+        self.soc = socket.socket()
         self.soc.connect((self._HOST, self._PORT))
 
-    def shutdown_client(self):
-        self.work = False
+    def _receive(self, size):
+        """
+        :type size: int
+        :param size: size with read from socket
+        :return: received data from socket
+        """
+        buf = ''
+        while size - len(buf) != 0:
+            tmp = self.soc.recv(size - len(buf))
+            buf += tmp
+        return buf
 
-    def run(self):
-        while self.work:
-            try:
-                data = self.receive_SDJP()
-            except InvalidProtocol:
-                self.shutdown_client()
-        self.soc.close()
+    def _send(self, msg):
+        """
+        :param msg: message for sending
+        """
+        size = len(msg)
+        buf = 0
+        while buf < size:
+            buf += self.soc.send(msg)
+
+    def receive_SDJP(self):
+        """
+        Receive data from socket in SDJP Format
+
+        :raise: InvalidProtocol
+        :rtype: dict
+        :return: Body of protocol
+        """
+        head = self._receive(32)
+        try:
+            size = int(head, base=2)
+        except ValueError:
+            raise InvalidProtocol(92)
+        raw_body = self._receive(size)
+        if raw_body:
+            raw_body = self.validation(raw_body)
+        return raw_body
+
+    def send_SDJP(self, msg):
+        """
+        Send data using SDJP.
+
+        :param msg: dict with keys command, type, data
+        """
+        data = json.dumps(msg)
+        frame = '{head:032b}{data}'.format(head=len(data), data=data)
+        self._send(frame)

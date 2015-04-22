@@ -263,7 +263,7 @@ class Manager(object):
         else:
             new_downloading_thread = DownloadFile(url, self.path_to_save_dir)
             self._threads.update({new_downloading_thread.generate_file_name():
-                              new_downloading_thread})
+                                  new_downloading_thread})
             new_downloading_thread.start()
 
     def start_all_downloads(self):

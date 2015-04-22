@@ -61,7 +61,7 @@ class NetworkAdapter(BaseClient):
         body = dict(type="COMMAND", command="DELETE", data=name)
         self.send_SDJP(body)
 
-    def command_close_all(self):
+    def command_close_all(self, arg=None):
         body = dict(type="COMMAND", command="CLOSE_ALL", data='')
         self.send_SDJP(body)
 
@@ -69,7 +69,7 @@ class NetworkAdapter(BaseClient):
         body = dict(type="COMMAND", command="PAUSE_START", data=name)
         self.send_SDJP(body)
 
-    def command_info(self):
+    def command_info(self, arg=None):
         body = dict(type="COMMAND", command="INFO", data='')
         self.send_SDJP(body)
         try:
@@ -100,7 +100,7 @@ class UI(object):
 
         self.network = network_adapter_instance
         self.info_about_downloads = None
-        if file_path and isinstance(file_path, str):
+        if file_path:
             self._init_main(file_path)
         else:
             raise cde.EmptyInputData("Wrong path to file")
