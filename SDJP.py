@@ -36,6 +36,18 @@ class ConnectionError(SDJPError):
     pass
 
 
+class ConnectionInUse(ConnectionError):
+    pass
+
+
+class ConnectionBreak(ConnectionError):
+    pass
+
+
+class ConnectionClosed(ConnectionError):
+    pass
+
+
 SDJP_COMMAND = ('info', 'add', 'delete', 'pause_start', 'start', 'close_all')
 SDJP_TYPE = ('json', 'string', 'command')
 
@@ -51,11 +63,11 @@ class BaseSDJP(object):
         try:
             data = json.loads(raw_body)
         except ValueError:
-            raise InvalidProtocol('Wrong protocol body')
+            raise InvalidProtocol('Receive wrong data')
         if 'type' and 'command' and 'data' in data:
             if data['type'].lower() in SDJP_TYPE:
                 return data
-        raise InvalidProtocol('Wrong protocol rows')
+        raise InvalidProtocol('Wrong protocol data')
 
     def run_command(self, data):
         cmd_map = {'close_all': self.command_close_all,
@@ -113,54 +125,78 @@ class BaseServer(BaseSDJP):
     """
     _IP = 'localhost'
     _PORT = 5000
-    _BLOCK_SIZE = 1024
-    _BACKLOG = 2
+    _BACKLOG = 1
 
     server_work = True
     download = True
 
     def __init__(self):
+        """
+        :raise: ConnectionInUse
+        """
         self.soc = socket.socket()
-        self.soc.bind((self._IP, self._PORT))
-        self.soc.listen(self._BACKLOG)
+        try:
+            self.soc.bind((self._IP, self._PORT))
+            self.soc.listen(self._BACKLOG)
+        except socket.error as err:
+            raise ConnectionInUse(err.args)
 
     def _receive(self, size):
         """
         :type size: int
         :param size: size with read from socket
+        :raise: ConnectionClosed
         :return: received data from socket
         """
         buf = ''
-        while size - len(buf) != 0:
-            tmp = self.connection.recv(size - len(buf))
-            buf += tmp
+        try:
+            while size - len(buf) != 0:
+                tmp = self.connection.recv(size - len(buf))
+                buf += tmp
+        except socket.error as err:
+            raise ConnectionClosed(err.args)
         return buf
 
     def _send(self, msg):
         """
         :param msg: message for sending
+        :raise: ConnectionClosed
         """
         size = len(msg)
         buf = 0
-        while buf < size:
-            buf += self.connection.send(msg)
+        try:
+            while buf < size:
+                buf += self.connection.send(msg)
+        except socket.error as err:
+            raise ConnectionClosed(err.args)
 
     def receive_SDJP(self):
+        """
+        :raise: InvalidProtocol
+        :rtype: dict
+        :return: valid SDJP data, or raise exception if it invalid
+        """
         data = self._receive(32)
         try:
             size = int(data, base=2)
         except ValueError:
-            raise InvalidProtocol(111)
+            raise InvalidProtocol('Receive wrong data')
         data = self._receive(size)
         data = self.validation(data)
         return data
 
     def send_SDJP(self, msg):
+        """
+        :param msg: serializable object
+        """
         data = json.dumps(msg)
         frame = '{head:032b}{body}'.format(head=len(data), body=data)
         self._send(frame)
 
     def shutdown_server(self):
+        """
+        Safely close server
+        """
         self.server_work = False
 
     def run(self):
@@ -171,7 +207,7 @@ class BaseServer(BaseSDJP):
                 try:
                     data = self.receive_SDJP()
                     self.run_command(data)
-                except InvalidProtocol:
+                except SDJPError:
                     self.connection.close()
                     self.download = False
         self.soc.close()
@@ -180,34 +216,47 @@ class BaseServer(BaseSDJP):
 class BaseClient(BaseSDJP):
     _HOST = 'localhost'
     _PORT = 5000
-    _BLOCK_SIZE = 1024
 
     work = True
 
     def __init__(self):
+        """
+        :raise: ConnectionClosed
+        """
         self.soc = socket.socket()
-        self.soc.connect((self._HOST, self._PORT))
+        try:
+            self.soc.connect((self._HOST, self._PORT))
+        except socket.error as err:
+            raise ConnectionClosed(err.args)
 
     def _receive(self, size):
         """
         :type size: int
+        :raise: ConnectionClosed
         :param size: size with read from socket
         :return: received data from socket
         """
         buf = ''
         while size - len(buf) != 0:
-            tmp = self.soc.recv(size - len(buf))
+            try:
+                tmp = self.soc.recv(size - len(buf))
+            except socket.error as err:
+                raise ConnectionClosed(err.args)
             buf += tmp
         return buf
 
     def _send(self, msg):
         """
+        :raise: ConnectionClosed
         :param msg: message for sending
         """
         size = len(msg)
         buf = 0
         while buf < size:
-            buf += self.soc.send(msg)
+            try:
+                buf += self.soc.send(msg)
+            except socket.error as err:
+                raise ConnectionClosed(err.args)
 
     def receive_SDJP(self):
         """
@@ -221,7 +270,7 @@ class BaseClient(BaseSDJP):
         try:
             size = int(head, base=2)
         except ValueError:
-            raise InvalidProtocol(92)
+            raise InvalidProtocol("Receive wrong data")
         raw_body = self._receive(size)
         if raw_body:
             raw_body = self.validation(raw_body)
@@ -230,8 +279,7 @@ class BaseClient(BaseSDJP):
     def send_SDJP(self, msg):
         """
         Send data using SDJP.
-
-        :param msg: dict with keys command, type, data
+        :param msg: serializable object
         """
         data = json.dumps(msg)
         frame = '{head:032b}{data}'.format(head=len(data), data=data)

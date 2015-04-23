@@ -6,7 +6,7 @@ import random
 import threading
 
 import console_downloader_errors as cde
-from SDJP import BaseServer
+from SDJP import BaseServer, SDJPError
 
 log = logging.getLogger('file_downloader')
 log.setLevel(logging.DEBUG)
@@ -200,7 +200,7 @@ class DownloadFile(threading.Thread):
 class InfoDownload(object):
     """
     Object for save information about thread (name, status, error_msg if
-    exist, is_finished)
+    exist, is_finished, is_paused, file size and downloaded size)
     """
     name = None
     status = None
@@ -331,14 +331,15 @@ class Manager(object):
 
 class Ninja(BaseServer):
     def __init__(self, manager):
-        super(Ninja, self).__init__()
         assert isinstance(manager, Manager)
+        super(Ninja, self).__init__()
         self.manager = manager
 
     def command_delete(self, name):
         self.manager.close_download_by_index(name)
 
     def command_close_all(self, arg):
+        self.download = False
         self.manager.close_all_downloads()
 
     def command_pause_start(self, name):
@@ -364,11 +365,11 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         serv.manager.close_all_downloads()
         print "-- Shutdown --"
-    except cde.ConsoleDownloadBaseException as error:
+    except SDJPError as error:
         if serv:
             serv.manager.close_all_downloads()
-        print "Oops... Something wrong --", error
+        print "Oops... Something wrong --    ", error
         exit(1)
-    # except Exception as e:
-    #     print "Fatal Error", e.message
-    #     exit(2)
+    except Exception as e:
+        print "Fatal Error", e.message
+        exit(2)

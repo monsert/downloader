@@ -445,6 +445,7 @@ class TestBaseSDJP (unittest.TestCase):
         for di in valid_msg:
             self.assertEqual(base.run_command(di), None)
 
+
 class TestBaseClient(unittest.TestCase):
     valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
     invalid_msg = {'type': '', 'command': 'ADD', 'data': 'name'}
@@ -531,9 +532,9 @@ class TestBaseServer(unittest.TestCase):
 
     @mock.patch('SDJP.socket')
     def test_init(self, socket):
-        base = SDJP.BaseClient()
-        socket.bind.assert_with((base._HOST, base._PORT))
-        socket.listen.assert_with(base._BLOCK_SIZE)
+        base = SDJP.BaseServer()
+        socket.bind.assert_with((base._IP, base._PORT))
+        socket.listen.assert_with(base._BACKLOG)
 
     @mock.patch('SDJP.socket')
     def test_shutdown_server(self, socket):

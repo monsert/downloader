@@ -2,7 +2,7 @@ import logging
 import urwid
 
 import console_downloader_errors as cde
-from SDJP import BaseClient, InvalidProtocol
+from SDJP import BaseClient, InvalidProtocol, SDJPError
 
 log = logging.getLogger('file_downloader')
 log.setLevel(logging.DEBUG)
@@ -17,7 +17,6 @@ class DataFeed(object):
     Parse input file with one URL per line. Validates the URLs, discards
     empty.
     """
-
     def __init__(self, path_to_file_with_urls):
         """
         :raise: console_downloader_errors.FilePathError
@@ -48,6 +47,9 @@ class DataFeed(object):
 
 
 class NetworkAdapter(BaseClient):
+    """
+    Class with send command to server in specifically format (SDJP)
+    """
     def command_add(self, url):
         if type(url) in (set, list):
             for element in url:
@@ -269,11 +271,11 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         ui.close_all_downloads()
         print "-- Shutdown --"
-    except cde.ConsoleDownloadBaseException as error:
+    except SDJPError as error:
         if ui:
             ui.close_all_downloads()
-        print "Oops... Something wrong --", error
+        print "Oops... Something wrong --    ", error
         exit(1)
-        # except Exception as e:
-        # print "Fatal Error", e.message
-        #     exit(2)
+    except Exception as e:
+        print "Fatal Error ", e.message
+        exit(2)
