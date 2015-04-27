@@ -1,6 +1,7 @@
 import mock
 import unittest
 import json
+import struct
 
 import UI
 import SDJP
@@ -478,7 +479,7 @@ class TestBaseClient(unittest.TestCase):
     def test_receive_sdjp(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseClient()
         base.soc = mock_connection
@@ -488,7 +489,7 @@ class TestBaseClient(unittest.TestCase):
     def test_receive_sdjp2(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.invalid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseClient()
         base.soc = mock_connection
@@ -497,18 +498,18 @@ class TestBaseClient(unittest.TestCase):
     @mock.patch('SDJP.socket')
     def test_receive_sdjp3(self, socket):
         mock_connection = mock.MagicMock()
-        mock_connection.recv.side_effect = ['000000000000000000000000000000ab',
+        mock_connection.recv.side_effect = ['aaaa',
                                             json.dumps(self.valid_msg)]
 
         base = SDJP.BaseClient()
-        base.soc = mock_connection
+        base._receive = mock_connection
         self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
 
     @mock.patch('SDJP.socket')
     def test_receive_sdjp4(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseClient()
         base.soc = mock_connection
@@ -523,7 +524,6 @@ class TestBaseClient(unittest.TestCase):
         base.soc = mock_connection
         base.send_SDJP('test msg')
         socket.send.assert_called_once()
-        socket.send.assert_with("00000000000000000000000000001010{'test msg'}")
 
 
 class TestBaseServer(unittest.TestCase):
@@ -565,7 +565,7 @@ class TestBaseServer(unittest.TestCase):
     def test_receive_sdjp(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseServer()
         base.connection = mock_connection
@@ -575,7 +575,7 @@ class TestBaseServer(unittest.TestCase):
     def test_receive_sdjp2(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.invalid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseServer()
         base.connection = mock_connection
@@ -584,18 +584,18 @@ class TestBaseServer(unittest.TestCase):
     @mock.patch('SDJP.socket')
     def test_receive_sdjp3(self, socket):
         mock_connection = mock.MagicMock()
-        mock_connection.recv.side_effect = ['000000000000000000000000000000ab',
+        mock_connection.recv.side_effect = ['pppp',
                                             json.dumps(self.valid_msg)]
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
+        base._receive = mock_connection
         self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
 
     @mock.patch('SDJP.socket')
     def test_receive_sdjp4(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
-        mock_connection.recv.side_effect = ['{l:032b}'.format(l=len(tmp)), tmp]
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseServer()
         base.connection = mock_connection
@@ -610,26 +610,28 @@ class TestBaseServer(unittest.TestCase):
         base.connection = mock_connection
         base.send_SDJP('test msg')
         socket.send.assert_called_once()
-        socket.send.assert_with("00000000000000000000000000001010{'test msg'}")
+        socket.send.assert_with("{'test msg'}")
 
     @mock.patch('SDJP.socket')
     def test_run(self, socket):
         mock_connection = mock.MagicMock()
-        mock_connection.recv.side_effect = ['000011**',
-                                            json.dumps(self.valid_msg),
-                                            '000011**',
-                                            json.dumps(self.valid_msg)]
+        tmp = json.dumps(self.valid_msg)
+        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)),
+                                            tmp,
+                                            struct.pack( '!i', len(tmp)),
+                                            tmp]
         mock_connection.close.return_value = True
 
         mock_accept = mock.MagicMock()
         mock_accept.accept.return_value = mock_connection, 'localhost'
         mock_accept.close.return_value = None
 
+        tmp_invalid = json.dumps(self.invalid_msg)
         mock__receive = mock.MagicMock()
-        mock__receive.side_effect = ['000011',
-                                     json.dumps(self.valid_msg),
-                                     '000011',
-                                     json.dumps(self.invalid_msg)]
+        mock__receive.side_effect = [struct.pack( '!i', len(tmp)),
+                                     tmp,
+                                     struct.pack( '!i', len(tmp_invalid)),
+                                     tmp_invalid]
 
         base = SDJP.BaseServer()
         base._receive = mock__receive

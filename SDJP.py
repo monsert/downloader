@@ -2,7 +2,7 @@
 Simple Data JSON Protocol (SDJP)
 
 +-------------------------------------------------------------+
-|HEAD        -- string -- body length. bin 4 byte             |
+|HEAD        -- string -- body length. 4 byte                 |
 +-------------------------------------------------------------+
 |BODY                                                         |
 |    type    -- string -- command, json, string, response     |
@@ -180,7 +180,7 @@ class BaseServer(BaseSDJP):
         head = self._receive(4)
         try:
             size = struct.unpack('!i', head)[0]
-        except ValueError:
+        except (IndexError, struct.error):
             raise InvalidProtocol('Receive wrong data')
         data = self._receive(size)
         data = self.validation(data)
@@ -271,7 +271,7 @@ class BaseClient(BaseSDJP):
         head = self._receive(4)
         try:
             size = struct.unpack('!i', head)[0]
-        except ValueError:
+        except (IndexError, struct.error):
             raise InvalidProtocol("Receive wrong data")
         raw_body = self._receive(size)
         if raw_body:
