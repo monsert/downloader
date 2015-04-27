@@ -2,7 +2,7 @@ import logging
 import urwid
 
 import console_downloader_errors as cde
-from SDJP import BaseClient, InvalidProtocol, SDJPError
+from SDJP import BaseClient, InvalidProtocol, SDJPError, ConnectionError
 
 log = logging.getLogger('file_downloader')
 log.setLevel(logging.DEBUG)
@@ -151,10 +151,7 @@ class UI(object):
         :rtype: Padding with ListBox inside
         """
         body = [urwid.Text("Downloading list: "), urwid.Divider()]
-        log.info(type(info_about_downloads))
         for element in info_about_downloads:
-            log.error(type(element))
-            log.error(element)
             button = urwid.Button(self.str_format(element))
             urwid.connect_signal(button, 'click',
                                  self.sub_menu_download, element)
@@ -229,6 +226,8 @@ class UI(object):
         """
         self.sub_menu = False
         self.info_about_downloads = self.network.command_info()
+        if not self.info_about_downloads:
+            raise KeyboardInterrupt("No more downloads")
         self.main_screen.original_widget = \
             self.generate_downloads_status_list_box(self.info_about_downloads)
 
@@ -268,14 +267,19 @@ if __name__ == '__main__':
         net = NetworkAdapter()
         ui = UI(net, "/tmp/1.txt")
         ui.run()
-    except KeyboardInterrupt:
-        ui.close_all_downloads()
-        print "-- Shutdown --"
+    except KeyboardInterrupt as err:
+        try:
+            ui.close_all_downloads()
+        except ConnectionError as err:
+            print '\033[93m-- No response from server -- {} \n\033[0m'.format(
+                err.message)
+            exit(4)
+        print '\033[92m-- Shutdown -- {} \n\033[0m'.format(err.message)
     except SDJPError as error:
         if ui:
             ui.close_all_downloads()
-        print "Oops... Something wrong --    ", error
+        print '\n\033[93mOops... Something wrong --  {}\033[0m\n'.format(error)
         exit(1)
     except Exception as e:
-        print "Fatal Error ", e.message
+        print "\033[92mFatal Error {} \033[0m".format(e.message)
         exit(2)

@@ -365,7 +365,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         serv.manager.close_all_downloads()
         print "-- Shutdown --"
-    except SDJPError as error:
+    except (SDJPError, cde.ConsoleDownloadBaseException) as error:
         if serv:
             serv.manager.close_all_downloads()
         print "Oops... Something wrong --    ", error

@@ -2,7 +2,7 @@
 Simple Data JSON Protocol (SDJP)
 
 +-------------------------------------------------------------+
-|HEAD        -- string -- body length. format 000123**        |
+|HEAD        -- string -- body length. bin 4 byte             |
 +-------------------------------------------------------------+
 |BODY                                                         |
 |    type    -- string -- command, json, string, response     |
@@ -10,18 +10,19 @@ Simple Data JSON Protocol (SDJP)
 |                         'pause_start', 'start', 'close_all' |
 |    data    -- json/string --                                |
 +-------------------------------------------------------------+
-HEAD is string length 8 char. First 6 its length of body, Last 2  is '**'.
+HEAD is int length 4 byte.
 BODY is JSON. Only data row in BODY can be JSON
 If type in body SDJP is COMMAND
     command row most have one command from this list ('INFO', 'ADD', 'DELETE',
          'RUN_ALL', 'PAUSE', 'START'). not case sensitive
     data row will be empty if command not need data.
 
-Example: 000051**{'name': 'file4', 'size': 782, 'downloaded': 13110}
+Example: \x00\x00\x003{'name': 'file4', 'size': 782, 'downloaded': 13110}
 """
 
 import socket
 import json
+import struct
 
 
 class SDJPError(Exception):
@@ -176,9 +177,9 @@ class BaseServer(BaseSDJP):
         :rtype: dict
         :return: valid SDJP data, or raise exception if it invalid
         """
-        data = self._receive(32)
+        head = self._receive(4)
         try:
-            size = int(data, base=2)
+            size = struct.unpack('!i', head)[0]
         except ValueError:
             raise InvalidProtocol('Receive wrong data')
         data = self._receive(size)
@@ -190,7 +191,8 @@ class BaseServer(BaseSDJP):
         :param msg: serializable object
         """
         data = json.dumps(msg)
-        frame = '{head:032b}{body}'.format(head=len(data), body=data)
+        frame = '{head}{body}'.format(head=struct.pack('!i', len(data)),
+                                                             body=data)
         self._send(frame)
 
     def shutdown_server(self):
@@ -266,9 +268,9 @@ class BaseClient(BaseSDJP):
         :rtype: dict
         :return: Body of protocol
         """
-        head = self._receive(32)
+        head = self._receive(4)
         try:
-            size = int(head, base=2)
+            size = struct.unpack('!i', head)[0]
         except ValueError:
             raise InvalidProtocol("Receive wrong data")
         raw_body = self._receive(size)
@@ -282,5 +284,6 @@ class BaseClient(BaseSDJP):
         :param msg: serializable object
         """
         data = json.dumps(msg)
-        frame = '{head:032b}{data}'.format(head=len(data), data=data)
+        frame = '{head}{data}'.format(head=struct.pack('!i',len(data)),
+                                                            data=data)
         self._send(frame)
