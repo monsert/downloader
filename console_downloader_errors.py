@@ -16,3 +16,7 @@ class EmptyInputData(ConsoleDownloadBaseException):
 
 class WrongIndex(ConsoleDownloadBaseException):
     pass
+
+
+class ContentSizeError(ConsoleDownloadBaseException):
+    pass

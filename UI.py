@@ -1,8 +1,9 @@
+import json
 import logging
 import urwid
 
 import console_downloader_errors as cde
-from SDJP import BaseClient, InvalidProtocol, SDJPError, ConnectionError
+import SDJP
 
 log = logging.getLogger('file_downloader')
 log.setLevel(logging.DEBUG)
@@ -46,10 +47,22 @@ class DataFeed(object):
         return out
 
 
-class NetworkAdapter(BaseClient):
+class NetworkAdapter(SDJP.BaseClient):
     """
     Class with send command to server in specifically format (SDJP)
     """
+    SDJP_TYPE = ('json', 'string', 'command')
+
+    def validation(self, raw_body):
+        try:
+            data = json.loads(raw_body)
+        except ValueError:
+            raise SDJP.InvalidProtocol('Receive wrong data')
+        if 'type' and 'command' and 'data' in data:
+            if data['type'].lower() in self.SDJP_TYPE:
+                return data
+        raise SDJP.InvalidProtocol('Wrong protocol data')
+
     def command_add(self, url):
         if type(url) in (set, list):
             for element in url:
@@ -76,7 +89,8 @@ class NetworkAdapter(BaseClient):
         self.send_SDJP(body)
         try:
             info = self.receive_SDJP()
-        except InvalidProtocol:
+            info = self.validation(info)
+        except (SDJP.InvalidProtocol, ValueError, TypeError):
             return []
         return info['data']
 
@@ -267,19 +281,19 @@ if __name__ == '__main__':
         net = NetworkAdapter()
         ui = UI(net, "/tmp/1.txt")
         ui.run()
-    except KeyboardInterrupt as err:
+    except KeyboardInterrupt as error:
         try:
             ui.close_all_downloads()
-        except ConnectionError as err:
+        except SDJP.ConnectionError as error:
             print '\033[93m-- No response from server -- {} \n\033[0m'.format(
-                err.message)
+                error.message)
             exit(4)
-        print '\033[92m-- Shutdown -- {} \n\033[0m'.format(err.message)
-    except SDJPError as error:
+        print '\033[92m-- Shutdown -- {} \n\033[0m'.format(error.message)
+    except SDJP.SDJPError as error:
         if ui:
             ui.close_all_downloads()
         print '\n\033[93mOops... Something wrong --  {}\033[0m\n'.format(error)
         exit(1)
-    except Exception as e:
-        print "\033[92mFatal Error {} \033[0m".format(e.message)
+    except Exception as error:
+        print "\033[93mFatal Error {} \033[0m".format(error.message)
         exit(2)

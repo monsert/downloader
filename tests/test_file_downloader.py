@@ -236,7 +236,6 @@ class TestManager(unittest.TestCase):
 
 
 class TestInfoDownload(unittest.TestCase):
-
     def test_init(self):
         info = file_downloader.InfoDownload('name', 'done', '', False, False,
                                             0, 100)
@@ -249,54 +248,58 @@ class TestInfoDownload(unittest.TestCase):
         self.assertEqual(info.file_downloaded_size, 100)
 
 
-class TestNinja(unittest.TestCase):
+class TestCommandServerProtocol(unittest.TestCase):
 
-    @mock.patch('file_downloader.BaseServer')
-    def test_init(self, base):
+    @mock.patch('SDJP.socket')
+    def test_init(self, socket):
         manage = file_downloader.Manager()
-        self.assertTrue(file_downloader.Ninja(manage))
+        self.assertTrue(file_downloader.CommandServerProtocol(manage))
 
-    def test_init_exception(self):
-        self.assertRaises(AssertionError, file_downloader.Ninja, '')
+    @mock.patch('SDJP.socket')
+    def test_init_exception(self, socket):
+        self.assertRaises(AssertionError, file_downloader.CommandServerProtocol, '')
 
-    def test_command_delete(self):
+    @mock.patch('SDJP.socket')
+    def test_command_delete(self, socket):
         man = file_downloader.Manager()
         mock_manage = mock.MagicMock()
         mock_manage.close_download_by_index.return_value = True
-        serv = file_downloader.Ninja(man)
+        serv = file_downloader.CommandServerProtocol(man)
         serv.manager = mock_manage
-        serv.command_delete('name')
+        serv.command_delete(None, None, 'name')
         mock_manage.close_download_by_index.assert_called_once_with('name')
 
     def test_command_close_all(self):
         man = file_downloader.Manager()
         mock_manage = mock.MagicMock()
         mock_manage.close_all_downloads.return_value = True
-        serv = file_downloader.Ninja(man)
+        serv = file_downloader.CommandServerProtocol(man)
         serv.manager = mock_manage
-        serv.command_close_all('')
+        su_self = mock.MagicMock
+        su_self.download = True
+        serv.command_close_all(su_self, None, '')
         mock_manage.close_all_downloads.assert_called_once()
+        self.assertFalse(su_self.download)
 
     def test_command_pause_start(self):
         man = file_downloader.Manager()
         mock_manage = mock.MagicMock()
         mock_manage.pause_start_download.return_value = True
-        serv = file_downloader.Ninja(man)
+        serv = file_downloader.CommandServerProtocol(man)
         serv.manager = mock_manage
-        serv.command_pause_start('name')
+        serv.command_pause_start(None, None, 'name')
         mock_manage.pause_start_download.assert_called_once_with('name')
 
     def test_command_add(self):
         man = file_downloader.Manager()
         mock_manage = mock.MagicMock()
         mock_manage.add_new_download.return_value = True
-        serv = file_downloader.Ninja(man)
+        serv = file_downloader.CommandServerProtocol(man)
         serv.manager = mock_manage
-        serv.command_add('url')
+        serv.command_add(None, None, 'url')
         mock_manage.add_new_download.assert_called_once_with('url')
 
     def test_command_get_info(self):
-        self.doCleanups()
         man = file_downloader.Manager()
 
         mock_manage = mock.MagicMock()
@@ -305,10 +308,12 @@ class TestNinja(unittest.TestCase):
         mock_info.return_value.__dict__ = {'name': 'object'}
         mock_manage.info_about_all_downloading = [mock_info]
 
-        serv = file_downloader.Ninja(man)
+        serv = file_downloader.CommandServerProtocol(man)
         serv.send_SDJP = lambda x: True
         serv.manager = mock_manage
-        serv.command_info('')
+        su_self = mock.MagicMock()
+        su_self.send_SDJP.return_value = True
+        serv.command_info(su_self, None, '')
         mock_manage.command_info.assert_called_once()
 
 # ------------------------UI.py------------------------------
@@ -344,6 +349,17 @@ class TestDataFeed(unittest.TestCase):
 
 
 class TestNetworkAdapter(unittest.TestCase):
+    valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
+    invalid_msg = {'type': '', 'command': 'ADD', 'data': 'name'}
+
+    def test_validation(self):
+        m = file_downloader.Manager()
+        base = file_downloader.CommandServerProtocol(m)
+        self.assertRaises(SDJP.InvalidProtocol, base.validation, "test")
+        self.assertRaises(SDJP.InvalidProtocol, base.validation, json.dumps(
+            self.invalid_msg))
+        self.assertEqual(base.validation(json.dumps(self.valid_msg)),
+                         self.valid_msg)
 
     @mock.patch('SDJP.socket')
     def test_command_add(self, socket):
@@ -356,9 +372,9 @@ class TestNetworkAdapter(unittest.TestCase):
         net.command_add(urls)
 
         self.assertEqual(net.send_SDJP.call_count, 4)
-
+#
     @mock.patch('SDJP.socket')
-    @mock.patch('UI.BaseClient')
+    @mock.patch('SDJP.BaseClient')
     def test_command_add2(self, base, socket):
         mock_send = mock.MagicMock()
         mock_send.send_SDJP.return_value = True
@@ -429,22 +445,32 @@ class TestBaseSDJP (unittest.TestCase):
     invalid_msg = {'type': '', 'command': 'ADD', 'data': 'name'}
 
     def test_validation(self):
-        base = SDJP.BaseServer()
+        m = file_downloader.Manager()
+        base = file_downloader.CommandServerProtocol(m)
         self.assertRaises(SDJP.InvalidProtocol, base.validation, "test")
         self.assertRaises(SDJP.InvalidProtocol, base.validation, json.dumps(
             self.invalid_msg))
         self.assertEqual(base.validation(json.dumps(self.valid_msg)),
                          self.valid_msg)
 
-    def test_run_command(self):
-        valid_msg = [{'command': 'ADD', 'data': 'name'},
-                     {'command': 'CLOSE_ALL', 'data': ''},
+    def test_action(self):
+        valid_msg = [{'command': 'PAUSE_START', 'data': 'name'},
                      {'command': 'DELETE', 'data': 'name'},
-                     {'command': 'PAUSE_START', 'data': 'name'},
+                     {'command': 'ADD', 'data': 'name'},
+                     {'command': 'CLOSE_ALL', 'data': ''},
                      {'command': 'INFO', 'data': ''}]
-        base = SDJP.BaseServer()
+        su_self = mock.MagicMock()
+        su_self.download = True
+        su_self.send_SDJP.return_value = True
+
+        mock_thread = mock.MagicMock()
+        mock_thread.close.return_value = True
+
+        m = file_downloader.Manager()
+        m._threads = {'name': mock_thread}
+        base = file_downloader.CommandServerProtocol(m)
         for di in valid_msg:
-            self.assertEqual(base.run_command(di), None)
+            self.assertEqual(base.action(su_self, None, di), None)
 
 
 class TestBaseClient(unittest.TestCase):
@@ -483,20 +509,10 @@ class TestBaseClient(unittest.TestCase):
 
         base = SDJP.BaseClient()
         base.soc = mock_connection
-        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+        self.assertEqual(base.receive_SDJP(), tmp)
 
     @mock.patch('SDJP.socket')
     def test_receive_sdjp2(self, socket):
-        mock_connection = mock.MagicMock()
-        tmp = json.dumps(self.invalid_msg)
-        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
-
-        base = SDJP.BaseClient()
-        base.soc = mock_connection
-        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
-
-    @mock.patch('SDJP.socket')
-    def test_receive_sdjp3(self, socket):
         mock_connection = mock.MagicMock()
         mock_connection.recv.side_effect = ['aaaa',
                                             json.dumps(self.valid_msg)]
@@ -506,14 +522,14 @@ class TestBaseClient(unittest.TestCase):
         self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
 
     @mock.patch('SDJP.socket')
-    def test_receive_sdjp4(self, socket):
+    def test_receive_sdjp3(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
         mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseClient()
         base.soc = mock_connection
-        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+        self.assertEqual(base.receive_SDJP(), tmp)
 
     @mock.patch('SDJP.socket')
     def test_send_sdjp(self, socket):
@@ -537,19 +553,12 @@ class TestBaseServer(unittest.TestCase):
         socket.listen.assert_with(base._BACKLOG)
 
     @mock.patch('SDJP.socket')
-    def test_shutdown_server(self, socket):
-        base = SDJP.BaseServer()
-        base.shutdown_server()
-        self.assertFalse(base.server_work)
-
-    @mock.patch('SDJP.socket')
     def test_receive(self, socket):
         mock_connection = mock.MagicMock()
         mock_connection.recv.side_effect = ['000111**',]
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
-        self.assertEqual(base._receive(8), '000111**')
+        self.assertEqual(base._receive(mock_connection, 8), '000111**')
 
     @mock.patch('SDJP.socket')
     def test_send(self, socket):
@@ -557,8 +566,7 @@ class TestBaseServer(unittest.TestCase):
         mock_connection.send.return_value = 6
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
-        base._send('000111')
+        base._send(mock_connection, '000111')
         socket.send.assert_with('000111')
 
     @mock.patch('SDJP.socket')
@@ -568,38 +576,27 @@ class TestBaseServer(unittest.TestCase):
         mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
-        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+        self.assertEqual(base.receive_SDJP(mock_connection), tmp)
 
     @mock.patch('SDJP.socket')
     def test_receive_sdjp2(self, socket):
         mock_connection = mock.MagicMock()
-        tmp = json.dumps(self.invalid_msg)
-        mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
-
-        base = SDJP.BaseServer()
-        base.connection = mock_connection
-        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
-
-    @mock.patch('SDJP.socket')
-    def test_receive_sdjp3(self, socket):
-        mock_connection = mock.MagicMock()
-        mock_connection.recv.side_effect = ['pppp',
+        mock_connection._receive.side_effect = ['0000',
                                             json.dumps(self.valid_msg)]
 
         base = SDJP.BaseServer()
         base._receive = mock_connection
-        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP)
+        self.assertRaises(SDJP.InvalidProtocol, base.receive_SDJP,
+                          None)
 
     @mock.patch('SDJP.socket')
-    def test_receive_sdjp4(self, socket):
+    def test_receive_sdjp3(self, socket):
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
         mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)), tmp]
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
-        self.assertEqual(base.receive_SDJP(), self.valid_msg)
+        self.assertEqual(base.receive_SDJP(mock_connection), tmp)
 
     @mock.patch('SDJP.socket')
     def test_send_sdjp(self, socket):
@@ -607,13 +604,26 @@ class TestBaseServer(unittest.TestCase):
         mock_connection.send.side_effect = [1111, 2222, 3, 4, 5, 6]
 
         base = SDJP.BaseServer()
-        base.connection = mock_connection
-        base.send_SDJP('test msg')
+        base.send_SDJP(mock_connection, 'test msg')
         socket.send.assert_called_once()
         socket.send.assert_with("{'test msg'}")
 
+
+class TestCustomProtocolServer(unittest.TestCase):
+    valid_msg = {'type': 'command', 'command': 'ADD', 'data': 'name'}
+    invalid_msg = {'type': '', 'command': 'delete', 'data': 'name'}
+
+
+    @mock.patch('SDJP.socket')
+    def test_shutdown_server(self, socket):
+        m = SDJP.BaseServerProtocol()
+        base = SDJP.CustomProtocolServer(m)
+        base.shutdown_server()
+        self.assertFalse(base.server_work)
+
     @mock.patch('SDJP.socket')
     def test_run(self, socket):
+        m = SDJP.BaseServerProtocol()
         mock_connection = mock.MagicMock()
         tmp = json.dumps(self.valid_msg)
         mock_connection.recv.side_effect = [struct.pack( '!i', len(tmp)),
@@ -633,7 +643,7 @@ class TestBaseServer(unittest.TestCase):
                                      struct.pack( '!i', len(tmp_invalid)),
                                      tmp_invalid]
 
-        base = SDJP.BaseServer()
+        base = SDJP.CustomProtocolServer(m)
         base._receive = mock__receive
 
         base.soc = mock_accept
@@ -643,6 +653,6 @@ class TestBaseServer(unittest.TestCase):
         except StopIteration:
             base.shutdown_server()
             base.run()
-        self.assertEqual(base.soc.accept.call_count, 2)
+        self.assertEqual(base.soc.accept.call_count, 1)
         self.assertTrue(base.download)
         base.soc.close.assert_called_once()

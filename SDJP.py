@@ -49,87 +49,28 @@ class ConnectionClosed(ConnectionError):
     pass
 
 
-SDJP_COMMAND = ('info', 'add', 'delete', 'pause_start', 'start', 'close_all')
-SDJP_TYPE = ('json', 'string', 'command')
+class BaseServerProtocol(object):
 
-
-class BaseSDJP(object):
     def validation(self, raw_body):
         """
-        :param raw_body: JSON
-        :rtype: dict
-        :raise: InvalidProtocol
-        :return: Body of protocol
+        Handling only with SDJPError and child raise.
         """
-        try:
-            data = json.loads(raw_body)
-        except ValueError:
-            raise InvalidProtocol('Receive wrong data')
-        if 'type' and 'command' and 'data' in data:
-            if data['type'].lower() in SDJP_TYPE:
-                return data
-        raise InvalidProtocol('Wrong protocol data')
+        return raw_body
 
-    def run_command(self, data):
-        cmd_map = {'close_all': self.command_close_all,
-                   'delete': self.command_delete,
-                   'pause_start': self.command_pause_start,
-                   'info': self.command_info,
-                   'add': self.command_add,}
+    def action(self, su_self, connection, data):
+        """
 
-        cmd_map[data['command'].lower()](data['data'])
-
-    def command_add(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_delete(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_close_all(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_pause_start(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param arg: one argument with is data in SDJP
-        """
-        pass
-
-    def command_info(self, arg):
-        """
-        You may override this method in a subclass. If you want to use this
-        command from SDJP.
-        :param arg: one argument with is data in SDJP
+        :param su_self: refer to server class for use send/receive
+        :param connection: connection to client. For sent response if it needed.
+        :param data: data after validation function
         """
         pass
 
 
-class BaseServer(BaseSDJP):
-    """
-    Server with consume data only in SDJP.
-    """
+class BaseServer(object):
     _IP = 'localhost'
     _PORT = 5000
     _BACKLOG = 1
-
-    server_work = True
-    download = True
 
     def __init__(self):
         """
@@ -142,9 +83,10 @@ class BaseServer(BaseSDJP):
         except socket.error as err:
             raise ConnectionInUse(err.args)
 
-    def _receive(self, size):
+    def _receive(self, connection, size):
         """
         :type size: int
+        :param connection: socket connection to client
         :param size: size with read from socket
         :raise: ConnectionClosed
         :return: received data from socket
@@ -152,14 +94,15 @@ class BaseServer(BaseSDJP):
         buf = ''
         try:
             while size - len(buf) != 0:
-                tmp = self.connection.recv(size - len(buf))
+                tmp = connection.recv(size - len(buf))
                 buf += tmp
         except socket.error as err:
             raise ConnectionClosed(err.args)
         return buf
 
-    def _send(self, msg):
+    def _send(self, connection, msg):
         """
+        :param connection: socket connection to client
         :param msg: message for sending
         :raise: ConnectionClosed
         """
@@ -167,33 +110,46 @@ class BaseServer(BaseSDJP):
         buf = 0
         try:
             while buf < size:
-                buf += self.connection.send(msg)
+                buf += connection.send(msg)
         except socket.error as err:
             raise ConnectionClosed(err.args)
 
-    def receive_SDJP(self):
+    def receive_SDJP(self, connection):
         """
+        :param connection: socket connection to client
         :raise: InvalidProtocol
         :rtype: dict
-        :return: valid SDJP data, or raise exception if it invalid
+        :return: SDJP data, or raise exception if header invalid
         """
-        head = self._receive(4)
+        head = self._receive(connection, 4)
         try:
             size = struct.unpack('!i', head)[0]
         except (IndexError, struct.error):
-            raise InvalidProtocol('Receive wrong data')
-        data = self._receive(size)
-        data = self.validation(data)
+            raise InvalidProtocol('Receive wrong header data')
+        data = self._receive(connection, size)
         return data
 
-    def send_SDJP(self, msg):
+    def send_SDJP(self, connection, msg):
         """
         :param msg: serializable object
         """
         data = json.dumps(msg)
         frame = '{head}{body}'.format(head=struct.pack('!i', len(data)),
                                                              body=data)
-        self._send(frame)
+        self._send(connection, frame)
+
+
+class CustomProtocolServer(BaseServer):
+    server_work = True
+    download = True
+
+    def __init__(self, protocol):
+        """
+        :raise: ConnectionInUse
+        """
+        BaseServer.__init__(self)
+        assert isinstance(protocol, BaseServerProtocol)
+        self.protocol = protocol
 
     def shutdown_server(self):
         """
@@ -203,23 +159,23 @@ class BaseServer(BaseSDJP):
 
     def run(self):
         while self.server_work:
-            self.connection, address = self.soc.accept()
+            connection, address = self.soc.accept()
+            print 'connected address ',address
             self.download = True
             while self.download:
                 try:
-                    data = self.receive_SDJP()
-                    self.run_command(data)
+                    data = self.receive_SDJP(connection)
+                    data = self.protocol.validation(data)
+                    self.protocol.action(self, connection, data)
                 except SDJPError:
-                    self.connection.close()
+                    connection.close()
                     self.download = False
         self.soc.close()
 
 
-class BaseClient(BaseSDJP):
+class BaseClient(object):
     _HOST = 'localhost'
     _PORT = 5000
-
-    work = True
 
     def __init__(self):
         """
@@ -274,8 +230,6 @@ class BaseClient(BaseSDJP):
         except (IndexError, struct.error):
             raise InvalidProtocol("Receive wrong data")
         raw_body = self._receive(size)
-        if raw_body:
-            raw_body = self.validation(raw_body)
         return raw_body
 
     def send_SDJP(self, msg):

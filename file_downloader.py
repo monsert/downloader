@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import string
@@ -6,7 +7,7 @@ import random
 import threading
 
 import console_downloader_errors as cde
-from SDJP import BaseServer, SDJPError
+import SDJP
 
 log = logging.getLogger('file_downloader')
 log.setLevel(logging.DEBUG)
@@ -79,12 +80,17 @@ class DownloadFile(threading.Thread):
         return self._file_name
 
     def get_file_size(self):
+        """
+        :rtype : int
+        :raise: ContentSizeError
+        :return: file size
+        """
         try:
             download_file = urllib2.urlopen(self._url)
             file_size = int(download_file.info().getheaders(
                 'Content-Length')[0])
         except (urllib2.URLError, ValueError, IndexError):
-            return 0
+            raise cde.ContentSizeError("Can not get file size")
         return file_size
 
     def run(self):
@@ -92,7 +98,10 @@ class DownloadFile(threading.Thread):
         Override method from class Thread for downloading file in thread.
         """
         self._file_name = self.generate_file_name()
-        self._size_file = self.get_file_size()
+        try:
+            self._size_file = self.get_file_size()
+        except cde.ContentSizeError:
+            self._size_file = 0
         try:
             url_handler = urllib2.urlopen(self._url)
         except (urllib2.URLError, ValueError) as err:
@@ -296,7 +305,7 @@ class Manager(object):
             self._threads[name].close()
             self._threads.pop(name)
         else:
-            raise cde.WrongIndex("Wrong file name")
+            raise cde.WrongIndex("Wrong file name. No download with such name")
 
     def pause_start_download(self, name):
         """
@@ -307,7 +316,7 @@ class Manager(object):
         if name in self._threads:
             self._threads[name].pause_start()
         else:
-            raise cde.WrongIndex("Wrong file name")
+            raise cde.WrongIndex("Wrong file name. No download with such name")
 
     @property
     def info_about_all_downloading(self):
@@ -329,45 +338,75 @@ class Manager(object):
         return out
 
 
-class Ninja(BaseServer):
+class CommandServerProtocol(SDJP.BaseServerProtocol):
+    SDJP_COMMAND = ('info', 'add', 'delete', 'pause_start', 'start', 'close_all')
+    SDJP_TYPE = ('json', 'string', 'command')
+
     def __init__(self, manager):
+        super(CommandServerProtocol, self).__init__()
         assert isinstance(manager, Manager)
-        super(Ninja, self).__init__()
         self.manager = manager
 
-    def command_delete(self, name):
+    def validation(self, raw_body):
+        """
+        :param raw_body: JSON
+        :rtype: dict
+        :raise: InvalidProtocol
+        :return: Body of protocol
+        """
+        try:
+            data = json.loads(raw_body)
+        except ValueError:
+            raise SDJP.InvalidProtocol('Receive wrong data')
+        if 'type' and 'command' and 'data' in data:
+            if data['type'].lower() in self.SDJP_TYPE:
+                return data
+        raise SDJP.InvalidProtocol('Wrong protocol data')
+
+    def action(self, su_self, connection, data):
+
+        cmd_map = {'close_all': self.command_close_all,
+                   'delete': self.command_delete,
+                   'pause_start': self.command_pause_start,
+                   'info': self.command_info,
+                   'add': self.command_add}
+
+        cmd_map[data['command'].lower()](su_self, connection, data['data'])
+
+    def command_delete(self, su_self, connection, name):
         self.manager.close_download_by_index(name)
 
-    def command_close_all(self, arg):
-        self.download = False
+    def command_close_all(self, su_self, connection, arg):
+        su_self.download = False
         self.manager.close_all_downloads()
 
-    def command_pause_start(self, name):
+    def command_pause_start(self, su_self, connection, name):
         self.manager.pause_start_download(name)
 
-    def command_add(self, url):
+    def command_add(self, su_self, connection, url):
         self.manager.add_new_download(url)
 
-    def command_info(self, arg):
+    def command_info(self, su_self, connection, arg):
         out = []
         for info in self.manager.info_about_all_downloading:
             out.append(info.__dict__)
         frame = dict(type='json', command="", data=out)
-        self.send_SDJP(frame)
+        su_self.send_SDJP(connection, frame)
 
 
 if __name__ == '__main__':
     serv = None
     try:
         manage = Manager()
-        serv = Ninja(manage)
+        proto = CommandServerProtocol(manage)
+        serv = SDJP.CustomProtocolServer(proto)
         serv.run()
     except KeyboardInterrupt:
-        serv.manager.close_all_downloads()
+        serv.protocol.manager.close_all_downloads()
         print "-- Shutdown --"
-    except (SDJPError, cde.ConsoleDownloadBaseException) as error:
+    except (SDJP.SDJPError, cde.ConsoleDownloadBaseException) as error:
         if serv:
-            serv.manager.close_all_downloads()
+            serv.protocol.manager.close_all_downloads()
         print "Oops... Something wrong --    ", error
         exit(1)
     except Exception as e:
